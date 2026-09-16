@@ -7,11 +7,17 @@ on:
       - main
     paths:
       - 'Dockerfile'
+      - 'Dockerfile.python'
       - 'docker-compose.yml'
+      - 'docker-compose.java.yml'
+      - 'docker-compose.python.yml'
       - '.dockerignore'
       - 'docker/**'
       - 'java/**'
       - 'quarkus/**'
+      - 'src/**'
+      - 'dotnet/**'
+      - 'pyproject.toml'
       - 'LICENSE'
       - 'THIRD_PARTY_NOTICES.md'
       - 'THIRD_PARTY_LICENSES.md'
@@ -22,31 +28,59 @@ permissions:
 
 jobs:
   smoke:
+    name: Docker ${{ matrix.engine }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: java
+            compose: docker-compose.java.yml
+            service: normalizer-java
+            log_file: /data/logs/ooxml-compat-normalize-quarkus.log
+            log_marker: OOXML Compat Normalize Quarkus local service started
+          - engine: python
+            compose: docker-compose.python.yml
+            service: normalizer-python
+            log_file: /data/logs/ooxml-compat-normalize-python.log
+            log_marker: OOXML Compat Normalize Python web service started
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Build and start local container
+      - name: Build and start ${{ matrix.engine }} container
         shell: bash
+        env:
+          COMPOSE_FILE: ${{ matrix.compose }}
         run: |
           set -euo pipefail
           export OOXML_PORT=18083
-          docker compose up --build -d
+          docker compose -f "$COMPOSE_FILE" up --build -d
 
-      - name: Verify API, UI, persistent log, legal material and non-root runtime
+      - name: Verify UI, REST API, normalization, logs and non-root runtime
         shell: bash
+        env:
+          COMPOSE_FILE: ${{ matrix.compose }}
+          SERVICE: ${{ matrix.service }}
+          ENGINE: ${{ matrix.engine }}
+          LOG_FILE: ${{ matrix.log_file }}
+          LOG_MARKER: ${{ matrix.log_marker }}
         run: |
           set -euo pipefail
           export OOXML_PORT=18083
+
+          compose() {
+            docker compose -f "$COMPOSE_FILE" "$@"
+          }
           cleanup() {
-            docker compose logs normalizer || true
-            docker compose down -v || true
+            compose logs "$SERVICE" || true
+            compose down -v || true
           }
           trap cleanup EXIT
 
           started=false
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             if curl -fsS http://127.0.0.1:18083/api/info > /tmp/ooxml-docker-info.json; then
               started=true
               break
@@ -54,7 +88,7 @@ jobs:
             sleep 1
           done
           if [[ "$started" != true ]]; then
-            echo 'Dockerized Quarkus service did not become ready' >&2
+            echo "Dockerized $ENGINE service did not become ready" >&2
             exit 1
           fi
 
@@ -63,30 +97,84 @@ jobs:
           grep -q 'Normalizza e scarica' /tmp/ooxml-docker-home.html
           cat /tmp/ooxml-docker-info.json
 
-          # The named volume must be writable by the non-root application user
-          # and must contain the rotating Quarkus file log.
-          docker compose exec -T normalizer sh -c 'test -w /data/logs'
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+
+          target = Path('/tmp/ooxml-rest-smoke.docx')
+          content_types = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+            <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+            <Default Extension="xml" ContentType="application/xml"/>
+            <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+          </Types>'''
+          root_rels = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+          </Relationships>'''
+          document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:body><w:p><w:r><w:t>OOXML Docker REST smoke test</w:t></w:r></w:p><w:sectPr/></w:body>
+          </w:document>'''
+          with ZipFile(target, 'w', ZIP_DEFLATED) as zf:
+              zf.writestr('[Content_Types].xml', content_types)
+              zf.writestr('_rels/.rels', root_rels)
+              zf.writestr('word/document.xml', document)
+          PY
+
+          curl -fsS \
+            -X POST \
+            -H 'Content-Type: application/octet-stream' \
+            -H 'X-Filename: ooxml-rest-smoke.docx' \
+            --data-binary @/tmp/ooxml-rest-smoke.docx \
+            http://127.0.0.1:18083/api/audit \
+            > /tmp/ooxml-docker-audit.json
+          grep -qi 'docx' /tmp/ooxml-docker-audit.json
+          cat /tmp/ooxml-docker-audit.json
+
+          curl -fsS \
+            -X POST \
+            -H 'Content-Type: application/octet-stream' \
+            -H 'X-Filename: ooxml-rest-smoke.docx' \
+            --data-binary @/tmp/ooxml-rest-smoke.docx \
+            'http://127.0.0.1:18083/api/normalize?profile=preserve-v1' \
+            -o /tmp/ooxml-rest-normalized.docx
+
+          python - <<'PY'
+          from zipfile import ZipFile
+          with ZipFile('/tmp/ooxml-rest-normalized.docx') as zf:
+              assert '[Content_Types].xml' in zf.namelist()
+              assert 'word/document.xml' in zf.namelist()
+              assert zf.testzip() is None
+          PY
+
+          compose exec -T "$SERVICE" sh -c 'test -w /data/logs'
           for i in $(seq 1 20); do
-            if docker compose exec -T normalizer sh -c 'test -s /data/logs/ooxml-compat-normalize-quarkus.log'; then
+            if compose exec -T "$SERVICE" sh -c "test -s '$LOG_FILE'"; then
               break
             fi
             sleep 0.25
           done
-          docker compose exec -T normalizer sh -c 'test -s /data/logs/ooxml-compat-normalize-quarkus.log'
-          docker compose exec -T normalizer grep -q 'OOXML Compat Normalize Quarkus local service started' /data/logs/ooxml-compat-normalize-quarkus.log
+          compose exec -T "$SERVICE" sh -c "test -s '$LOG_FILE'"
+          compose exec -T "$SERVICE" grep -q "$LOG_MARKER" "$LOG_FILE"
 
-          uid="$(docker compose exec -T normalizer id -u)"
+          uid="$(compose exec -T "$SERVICE" id -u)"
           test "$uid" != '0'
-          docker compose exec -T normalizer test -r /app/licenses/LICENSE
-          docker compose exec -T normalizer test -r /app/licenses/THIRD_PARTY_NOTICES.md
-          docker compose exec -T normalizer test -r /app/licenses/THIRD_PARTY_LICENSES.md
-          docker compose exec -T normalizer sh -c 'test -d "$JAVA_HOME/legal"'
+          compose exec -T "$SERVICE" test -r /app/licenses/LICENSE
+          compose exec -T "$SERVICE" test -r /app/licenses/THIRD_PARTY_NOTICES.md
+          compose exec -T "$SERVICE" test -r /app/licenses/THIRD_PARTY_LICENSES.md
 
-          # A normal restart must keep the same named volume and the service must
-          # become healthy again without changing to a root user.
-          docker compose restart normalizer
+          if [[ "$ENGINE" == java ]]; then
+            compose exec -T "$SERVICE" sh -c 'test -d "$JAVA_HOME/legal"'
+          else
+            compose exec -T "$SERVICE" test -x /app/validator/OpenXmlSdkValidator
+            compose exec -T "$SERVICE" test -r /app/licenses/dotnet/LICENSE.txt
+            compose exec -T "$SERVICE" test -r /app/licenses/dotnet/ThirdPartyNotices.txt
+          fi
+
+          compose restart "$SERVICE"
           restarted=false
-          for i in $(seq 1 45); do
+          for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:18083/api/info >/dev/null; then
               restarted=true
               break
@@ -94,8 +182,8 @@ jobs:
             sleep 1
           done
           test "$restarted" = true
-          docker compose exec -T normalizer sh -c 'test -s /data/logs/ooxml-compat-normalize-quarkus.log'
-          test "$(docker compose exec -T normalizer id -u)" != '0'
+          compose exec -T "$SERVICE" sh -c "test -s '$LOG_FILE'"
+          test "$(compose exec -T "$SERVICE" id -u)" != '0'
 
           trap - EXIT
           cleanup

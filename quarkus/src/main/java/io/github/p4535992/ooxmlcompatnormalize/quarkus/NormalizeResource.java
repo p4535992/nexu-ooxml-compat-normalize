@@ -38,7 +38,7 @@ public class NormalizeResource {
     public InfoResponse info() {
         return new InfoResponse(
                 "ooxml-compat-normalize-quarkus",
-                "0.4.0-rc.5",
+                "0.4.0-rc.6",
                 List.of("docx", "xlsx", "pptx"),
                 List.copyOf(PROFILES)
         );

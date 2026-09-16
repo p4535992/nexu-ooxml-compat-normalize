@@ -345,8 +345,8 @@ jobs:
               if (Test-Path $log) { Get-Content $log }
               throw 'Packaged Quarkus EXE did not become ready'
             }
-            $home = Invoke-WebRequest -Uri 'http://127.0.0.1:18081/' -TimeoutSec 5
-            if ($home.StatusCode -ne 200 -or $home.Content -notmatch 'Normalizza e scarica') {
+            $homePage = Invoke-WebRequest -Uri 'http://127.0.0.1:18081/' -TimeoutSec 5
+            if ($homePage.StatusCode -ne 200 -or $homePage.Content -notmatch 'Normalizza e scarica') {
               throw 'Packaged Quarkus home page is not available'
             }
             for ($i = 0; $i -lt 20 -and -not (Test-Path $log); $i++) { Start-Sleep -Milliseconds 250 }

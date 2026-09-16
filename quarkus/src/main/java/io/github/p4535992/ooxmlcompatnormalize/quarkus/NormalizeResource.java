@@ -91,7 +91,7 @@ public class NormalizeResource {
             if (!pre.valid()) {
                 throw new WebApplicationException(
                         "Input cannot be parsed by both Apache POI and docx4j",
-                        Response.Status.UNPROCESSABLE_ENTITY
+                        422
                 );
             }
 

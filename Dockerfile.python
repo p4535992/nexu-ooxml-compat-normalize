@@ -11,9 +11,11 @@ RUN dotnet publish dotnet/OpenXmlSdkValidator/OpenXmlSdkValidator.csproj \
     -p:IncludeNativeLibrariesForSelfExtract=true \
     -p:DebugType=None \
     -p:DebugSymbols=false \
-    -o /out/validator
+    -o /out/validator \
+    && cp /usr/share/dotnet/LICENSE.txt /out/validator/dotnet-LICENSE.txt \
+    && cp /usr/share/dotnet/ThirdPartyNotices.txt /out/validator/dotnet-ThirdPartyNotices.txt
 
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 LABEL org.opencontainers.image.title="OOXML Compat Normalize - Python" \
       org.opencontainers.image.description="OOXML normalization web/API service using the Python engine" \
@@ -21,11 +23,17 @@ LABEL org.opencontainers.image.title="OOXML Compat Normalize - Python" \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md ./
+COPY pyproject.toml README.md ./
+COPY LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md /app/licenses/
 COPY src/ src/
 COPY --from=validator-build /out/validator/OpenXmlSdkValidator /app/validator/OpenXmlSdkValidator
+COPY --from=validator-build /out/validator/dotnet-LICENSE.txt /app/licenses/dotnet/LICENSE.txt
+COPY --from=validator-build /out/validator/dotnet-ThirdPartyNotices.txt /app/licenses/dotnet/ThirdPartyNotices.txt
 
-RUN python -m pip install --no-cache-dir . \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libicu72 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-cache-dir . \
     && mkdir -p /data/logs \
     && chmod +x /app/validator/OpenXmlSdkValidator \
     && chown -R 10001:0 /app /data \

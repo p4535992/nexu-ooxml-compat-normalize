@@ -62,6 +62,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "jlink failed with exit code $LASTEXITCODE"
 }
 
+# jpackage launcher variables:
+#   $APPDIR  -> <image-root>\app
+#   $ROOTDIR -> <image-root>, beside the launcher EXE.
+# We deliberately use ROOTDIR so the portable log behaves like NexU and lives
+# under <extracted-zip>\OOXML-Compat-Normalize-Quarkus\logs.
 $ImageArguments = @(
     "--type", "app-image",
     "--name", $AppName,
@@ -72,7 +77,7 @@ $ImageArguments = @(
     "--input", $InputDirectory,
     "--main-jar", $QuarkusName,
     "--runtime-image", $RuntimeImage,
-    "--java-options", '-Dquarkus.log.file.path=$APPDIR/logs/ooxml-compat-normalize-quarkus.log',
+    "--java-options", '-Dquarkus.log.file.path=$ROOTDIR/logs/ooxml-compat-normalize-quarkus.log',
     "--java-options", "-Dooxml.open-browser=true"
 )
 
@@ -111,6 +116,14 @@ if (-not (Test-Path -LiteralPath (Join-Path $AppImage "LOGS.txt") -PathType Leaf
 }
 if (-not (Test-Path -LiteralPath (Join-Path $AppImage "logs") -PathType Container)) {
     throw "Portable logs directory is missing from app image"
+}
+
+# Print the generated launcher configuration in CI/build logs. This makes it
+# immediately visible which jpackage root variable is passed to Quarkus.
+$LauncherCfg = Join-Path $AppImage "app\$AppName.cfg"
+if (Test-Path -LiteralPath $LauncherCfg -PathType Leaf) {
+    Write-Host "Generated launcher configuration:"
+    Get-Content -LiteralPath $LauncherCfg
 }
 
 if (Test-Path -LiteralPath $PortableArchive) {

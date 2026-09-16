@@ -1,0 +1,81 @@
+name: Docker Compose smoke test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.dockerignore'
+      - 'docker/**'
+      - 'java/**'
+      - 'quarkus/**'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
+      - 'THIRD_PARTY_LICENSES.md'
+      - '.github/workflows/docker-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build and start local container
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf docker-data
+          export OOXML_PORT=18083
+          docker compose up --build -d
+
+      - name: Verify API, UI, log persistence and non-root runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OOXML_PORT=18083
+          cleanup() {
+            docker compose logs normalizer || true
+            docker compose down -v || true
+          }
+          trap cleanup EXIT
+
+          started=false
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18083/api/info > /tmp/ooxml-docker-info.json; then
+              started=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$started" != true ]]; then
+            echo 'Dockerized Quarkus service did not become ready' >&2
+            exit 1
+          fi
+
+          curl -fsS http://127.0.0.1:18083/ > /tmp/ooxml-docker-home.html
+          grep -q 'OOXML Compat Normalize' /tmp/ooxml-docker-home.html
+          grep -q 'Normalizza e scarica' /tmp/ooxml-docker-home.html
+          cat /tmp/ooxml-docker-info.json
+
+          for i in $(seq 1 20); do
+            [[ -s docker-data/logs/ooxml-compat-normalize-quarkus.log ]] && break
+            sleep 0.25
+          done
+          test -s docker-data/logs/ooxml-compat-normalize-quarkus.log
+          grep -q 'OOXML Compat Normalize Quarkus local service started' docker-data/logs/ooxml-compat-normalize-quarkus.log
+
+          uid="$(docker compose exec -T normalizer id -u)"
+          test "$uid" != '0'
+          docker compose exec -T normalizer test -r /app/licenses/LICENSE
+          docker compose exec -T normalizer test -r /app/licenses/THIRD_PARTY_NOTICES.md
+          docker compose exec -T normalizer sh -c 'test -d "$JAVA_HOME/legal"'
+
+          trap - EXIT
+          cleanup

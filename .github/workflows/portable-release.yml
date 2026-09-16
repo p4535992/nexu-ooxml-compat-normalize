@@ -11,7 +11,7 @@ permissions:
 jobs:
   sync:
     name: Sync renamed v0.4 source to main
-    if: github.event.head_commit.message != 'release: prepare ooxml-compat-normalize v0.4.0-rc.1'
+    if: "${{ github.event.head_commit.message != 'release-bootstrap-sync' }}"
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.commit.outputs.sha }}
@@ -53,7 +53,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git reset -- .github/workflows/portable-release.yml
-          git commit -m 'release: prepare ooxml-compat-normalize v0.4.0-rc.1'
+          git commit -m 'release-bootstrap-sync'
           git push origin HEAD:main
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 

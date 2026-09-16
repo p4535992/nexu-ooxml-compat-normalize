@@ -29,3 +29,21 @@ License: permissive Tcl/Tk license terms. Tkinter-based portable builds may incl
 ## PyInstaller bootloader
 
 License: GPLv2 with the PyInstaller bootloader exception permitting distribution of bundled applications under the application's own license, subject to the authoritative upstream terms for the exact PyInstaller release used to build the binary.
+
+## Apache POI 5.5.1
+
+License: Apache License, Version 2.0.
+
+Purpose in this project: Java-side OPC/OOXML parsing and cross-format validation for DOCX, XLSX and PPTX.
+
+Upstream: https://poi.apache.org/
+
+## docx4j 17.1.0
+
+License: Apache License, Version 2.0.
+
+Purpose in this project: second independent Java OOXML package/model parser used by the standalone JAR for pre-flight/post-flight validation.
+
+Upstream: https://www.docx4java.org/
+
+The shaded Java JAR also contains Maven-resolved transitive dependencies under their own open-source terms. Upstream `META-INF` license/notice resources and the Java module `THIRD-PARTY-NOTICES.txt` resource are part of the distribution inputs.

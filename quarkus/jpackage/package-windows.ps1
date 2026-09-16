@@ -104,7 +104,25 @@ $CoreLauncher = Join-Path $AppImage "ooxml-normalize.cmd"
 $OpenUi = Join-Path $AppImage "open-ui.cmd"
 @'
 @echo off
-start "" "http://127.0.0.1:8080/"
+setlocal
+set "OOXML_URL=http://127.0.0.1:8080/"
+set "OOXML_INFO=http://127.0.0.1:8080/api/info"
+
+rem If the local service is already running, just open its UI.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri '%OOXML_INFO%' -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>&1
+if not errorlevel 1 (
+    start "" "%OOXML_URL%"
+    exit /b 0
+)
+
+rem Otherwise start the packaged Quarkus launcher. The EXE waits for readiness
+rem and opens http://127.0.0.1:8080/ itself, avoiding a duplicate browser tab.
+if not exist "%~dp0OOXML-Compat-Normalize-Quarkus.exe" (
+    echo OOXML-Compat-Normalize-Quarkus.exe non trovato nella cartella corrente.
+    exit /b 1
+)
+start "" "%~dp0OOXML-Compat-Normalize-Quarkus.exe"
+exit /b 0
 '@ | Set-Content -LiteralPath $OpenUi -Encoding ASCII
 
 if (-not (Test-Path -LiteralPath (Join-Path $AppImage "$AppName.exe") -PathType Leaf)) {
@@ -112,6 +130,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $AppImage "$AppName.exe") -PathType 
 }
 if (-not (Test-Path -LiteralPath $CoreLauncher -PathType Leaf)) {
     throw "Core CLI launcher is missing from app image"
+}
+if (-not (Test-Path -LiteralPath $OpenUi -PathType Leaf)) {
+    throw "open-ui.cmd is missing from app image"
 }
 if (-not (Test-Path -LiteralPath (Join-Path $AppImage "LOGS.txt") -PathType Leaf)) {
     throw "LOGS.txt is missing from app image"

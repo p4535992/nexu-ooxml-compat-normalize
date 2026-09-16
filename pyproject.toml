@@ -3,14 +3,14 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "docx-compat-normalizer"
-version = "0.1.0"
-description = "Conservative OOXML normalizer for LibreOffice / ONLYOFFICE / Word interoperability"
+name = "ooxml-compat-normalize"
+version = "0.4.0rc1"
+description = "Loss-averse OOXML normalizer for DOCX/XLSX/PPTX cross-suite interoperability"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-  { name = "docx-compat-normalizer contributors" }
+  { name = "ooxml-compat-normalize contributors" }
 ]
 keywords = ["docx", "ooxml", "onlyoffice", "libreoffice", "xlsx", "pptx"]
 classifiers = [
@@ -24,8 +24,12 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+portable = ["pyinstaller>=6.10"]
+
 [project.scripts]
-ooxml-compat-normalize = "docx_compat_normalizer.cli:main"
+ooxml-compat-normalize = "ooxml_compat_normalize.cli:main"
+ooxml-compat-normalize-gui = "ooxml_compat_normalize.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

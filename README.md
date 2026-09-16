@@ -1,31 +1,40 @@
-# docx-compat-normalizer
+# ooxml-compat-normalize
 
 Loss-averse OOXML interoperability normalizer for **DOCX, XLSX and PPTX**.
 
-The project is designed to improve document portability between **LibreOffice, ONLYOFFICE, Microsoft Office and other OOXML-compatible applications** by normalizing selected interoperability-sensitive structures while preserving the original package as much as possible.
+The repository name is historical: the engine is OOXML-wide. It targets documents exchanged between LibreOffice, ONLYOFFICE, Microsoft Office and other OOXML consumers **without opening and re-saving the file in another office editor**.
 
-The goal is not to rebuild a document through a different office editor. Instead, the normalizer works directly on the OOXML package, audits it before conversion, applies narrowly-scoped compatibility rules, and verifies the result afterwards.
-
-> The repository name is historical: the project targets the three main OOXML document families, not only DOCX.
+The normalizer treats every Office file as an OPC/ZIP package, performs a preflight audit, applies only narrowly-scoped rules, preserves unknown content, verifies package invariants, then performs a postflight audit.
 
 ## Goal
 
-The normalizer tries to reduce cross-suite differences while preserving, whenever possible:
+Create a practical common OOXML representation that minimizes cross-suite drift while preserving as much author intent as possible:
 
 - fonts and font intent;
-- explicit colors and theme colors;
-- paragraph, cell and shape styles;
-- tables and layout properties;
-- numbering and lists;
+- direct and theme colors;
+- Word/Excel/PowerPoint styles;
+- tables, cells, shapes and drawing anchors;
 - themes and inheritance;
-- images, drawings and media;
-- headers, footers, notes and auxiliary parts;
+- images/media;
 - relationships and content types;
-- unsupported or unknown OOXML parts that do not need to be changed.
+- headers, footers, notes and auxiliary parts;
+- unknown/vendor parts unless a rule explicitly owns them.
 
-No tool can guarantee pixel-identical rendering in every office suite because renderers, installed fonts and implementation-specific behavior can differ. The project therefore follows a **loss-averse** approach: preserve what is already valid, normalize only what can be handled safely, and report situations that cannot be guaranteed instead of silently flattening content.
+No tool can promise pixel-identical rendering across every office suite, because installed font files, shaping engines and vendor-specific features remain environment-dependent. The project therefore supports **audit/report**, conservative normalization and fail-closed **strict mode** rather than silently flattening unsupported content.
 
-## Architecture
+## Profiles
+
+The output always remains in the **same OOXML family**: DOCX -> DOCX, XLSX -> XLSX, PPTX -> PPTX. The profiles control how much is made explicit.
+
+| Profile | Purpose |
+| --- | --- |
+| `preserve-v1` | Preserve package semantics; useful for audit/copy workflows and explicit user font mappings. |
+| `interop-transitional-v1` | Recommended conservative cross-suite profile; normalizes proven renderer-dependent constructs while preserving themes/defaults. |
+| `portable-explicit-v1` | Additionally materializes theme fonts/colors where unambiguous and safe implicit defaults supported by the engine. |
+
+`portable-explicit-v1` currently materializes only transformations the project can express without reconstructing the whole document model. Ambiguous theme color transforms, complex inheritance and high-risk vendor features remain preserved + reported.
+
+## Pipeline
 
 ```text
 LibreOffice / ONLYOFFICE / Microsoft Office / altro
@@ -47,152 +56,202 @@ LibreOffice / ONLYOFFICE / Microsoft Office / altro
                  OOXML normalizzato
 ```
 
-The pre-flight phase inventories the document before any modification. The format-specific normalizer then applies only compatible transformations for WordprocessingML, SpreadsheetML or PresentationML/DrawingML. The post-flight phase verifies package integrity and checks that required parts and relationships have not disappeared.
+The pre-flight combines the project's loss-averse package audit with an optional/embedded **Open XML SDK** structural validation. The format-specific engine then applies only narrowly-scoped transformations. Post-flight repeats package checks and Open XML SDK validation so a portable build can detect structural regressions instead of silently shipping them.
 
-## Current direction
+## What is implemented
 
-The project is intended to become a common normalization layer for documents produced by different office suites.
-
-Important interoperability areas include:
-
-- font inventory, fallback and explicit font mapping;
-- theme fonts and theme colors;
-- semantic colors that depend on renderer-specific emoji support;
-- Word tables, autofit, sections and style inheritance;
-- Excel number formats, rich text, conditional formatting and drawing anchors;
-- PowerPoint master/layout/theme inheritance, placeholders and text autofit;
-- OOXML Strict/Transitional compatibility;
-- suite-specific producer fingerprints;
-- preservation of unknown package parts and relationships;
-- pre-flight and post-flight validation.
-
-Rules are intentionally format-specific. A safe DOCX transformation is not automatically assumed to be safe for XLSX or PPTX.
-
-## Current implementation
-
-| Capability | DOCX | XLSX | PPTX |
+| Area | DOCX | XLSX | PPTX |
 | --- | --- | --- | --- |
-| Package-preserving OOXML copy | ✅ | ✅ | ✅ |
-| Format detection | ✅ | ✅ | ✅ |
-| Exact font-name mapping | ✅ | experimental | experimental |
-| Selected semantic-color normalization | ✅ | planned / experimental | planned / experimental |
-| LibreOffice / ONLYOFFICE editor round-trip | **never** | **never** | **never** |
+| Package-preserving copy + ZIP verification | ✅ | ✅ | ✅ |
+| Producer/conformance/font/risk preflight | ✅ | ✅ | ✅ |
+| Exact font mapping in real font declarations | ✅ | ✅ | ✅ |
+| Font inventory validation | ✅ | ✅ | ✅ |
+| Renderer-dependent color symbols -> explicit OOXML color | ✅ simple runs | ✅ rich-text runs | ✅ simple DrawingML runs |
+| Theme-font materialization (`portable-explicit-v1`) | ✅ `w:rFonts` | ✅ styles + DrawingML | ✅ DrawingML placeholders |
+| Theme-color materialization without tint/shade transforms | ✅ | ✅ | ✅ |
+| Word implicit table layout -> explicit `autofit` | ✅ | — | — |
+| Word style inheritance diagnostics | ✅ missing parents/cycles | — | — |
+| Excel custom number-format diagnostics | — | ✅ duplicate/missing IDs | — |
+| Excel conditional-format priority diagnostics | — | ✅ | — |
+| Excel `twoCellAnchor` default -> explicit `editAs="twoCell"` | — | ✅ | — |
+| PowerPoint master/layout inventory | — | — | ✅ |
+| PowerPoint implicit text-autofit diagnostics | — | — | ✅ |
+| Unknown/vendor parts preserved | ✅ | ✅ | ✅ |
+| Strict OOXML -> Transitional conversion | planned | planned | planned |
 
-The project evolves through real interoperability fixtures and regression tests. Features are only considered supported when a format-specific rule can preserve the rest of the package and can be verified afterwards.
+### Why some items are diagnostics only
 
-## Why direct OOXML normalization
+Examples such as Word style inheritance, Excel conditional-format ordering and PowerPoint autofit can affect layout or precedence. The project will not automatically rewrite them until a transformation has a verified semantic equivalence and regression fixtures. **Reporting a risky construct is preferable to silently changing it.**
 
-DOCX, XLSX and PPTX are OPC/ZIP packages containing XML parts, relationships, media and other resources.
+## Theme materialization
 
-Instead of performing:
+`portable-explicit-v1` can remove some renderer dependence while keeping the original package structure:
 
-```text
-LibreOffice file -> open in another editor -> save again
-```
+- Word theme font references such as `minorHAnsi` are resolved to the actual theme family in `w:rFonts`;
+- DrawingML placeholders such as `+mn-lt` are replaced with the theme's concrete latin font;
+- SpreadsheetML major/minor scheme fonts are materialized in `xl/styles.xml`;
+- simple theme colors with no tint/shade/luminance transforms are converted to explicit RGB/sRGB;
+- transformed/ambiguous theme colors are preserved and left for later rules.
 
-the project aims for:
-
-```text
-OOXML package
-    -> inspect
-    -> modify only selected compatibility-sensitive markup
-    -> preserve the remaining package
-    -> verify output
-```
-
-This reduces the risk of losing templates, tables, unsupported extensions, drawings or other structures just because another editor imported and re-exported the document.
+This is intentionally different from a global XML string replacement.
 
 ## Font strategy
 
-Font availability is one of the largest causes of cross-suite layout drift.
+Font files are external dependencies of the renderer. The default is therefore **preserve the original family names and inventory them**.
 
-The preferred behavior is to **preserve the original font declaration** and inventory the fonts required by the document. Explicit font mapping should only be used when the target environment is known not to contain the original font.
+Audit:
 
-A convenience mapping can use metric-compatible families such as Liberation fonts, but mappings are opt-in because changing a font family is a semantic document change.
+```bash
+ooxml-compat-normalize input.docx --audit-only --report preflight.json
+```
 
-Example:
+Verify a target renderer has every required family:
 
 ```bash
 ooxml-compat-normalize input.docx output.docx \
-  --font-profile liberation \
-  --report normalization-report.json
+  --strict \
+  --font-policy require-available \
+  --font-inventory target-fonts.txt
 ```
 
-## Usage
-
-Install the Python package:
+Explicit mapping is opt-in:
 
 ```bash
-python -m pip install .
+ooxml-compat-normalize input.pptx output.pptx \
+  --font-policy map \
+  --font-map 'Arial=Liberation Sans'
 ```
 
-For development:
+Convenience mappings are available:
+
+```bash
+ooxml-compat-normalize input.xlsx output.xlsx --font-profile liberation
+```
+
+The mapper touches only OOXML locations that declare font families; it never rewrites user-visible text containing the same words.
+
+## CLI usage
+
+Recommended conservative profile:
+
+```bash
+ooxml-compat-normalize input.docx output.docx \
+  --profile interop-transitional-v1 \
+  --report output.report.json
+```
+
+More explicit portable profile:
+
+```bash
+ooxml-compat-normalize input.pptx output.pptx \
+  --profile portable-explicit-v1 \
+  --report output.report.json
+```
+
+Preservation-oriented pass:
+
+```bash
+ooxml-compat-normalize input.xlsx output.xlsx --profile preserve-v1
+```
+
+## Portable GUI
+
+A small Tkinter GUI supports selecting one or more `.docx`, `.xlsx` or `.pptx` files, selecting the normalization profile, optionally applying explicit font mappings and writing JSON reports.
+
+The portable build embeds a self-contained **.NET 8 / Open XML SDK validator** inside the same one-file application. End users therefore do not need Python or .NET installed.
+
+The GUI always exports to the **same OOXML family**:
+
+```text
+DOCX -> DOCX
+XLSX -> XLSX
+PPTX -> PPTX
+```
+
+It does not claim that DOCX -> XLSX or PPTX -> DOCX is a safe interoperability conversion.
+
+Local builds:
+
+```powershell
+# Windows x64
+.\portable\build_windows_portable.ps1
+```
+
+```bash
+# Linux x64
+./portable/build_linux_portable.sh
+```
+
+GitHub Actions builds both platform executables and can attach them to a GitHub Release. See [`portable/README.md`](portable/README.md).
+
+## Tooling
+
+The project deliberately separates normalization from validation:
+
+- **Python standard library** (`zipfile`, XML/parsing utilities, hashing): package-preserving normalization and audit logic;
+- **Microsoft Open XML SDK**: independent DOCX/XLSX/PPTX schema/model validation before and after normalization;
+- **.NET 8 self-contained publish**: produces the validator helper without requiring a .NET installation on the end-user machine;
+- **Tkinter**: minimal desktop GUI for selecting files and profiles;
+- **PyInstaller**: build tool that bundles the Python GUI/engine and the self-contained .NET validator into one portable executable per operating system;
+- **GitHub Actions / GitHub CLI**: reproducible Windows/Linux builds, checksums and release publication.
+
+OpenXmlPowerTools, Apache POI and docx4j are useful candidates for additional regression/cross-parser testing, but they are **not runtime dependencies** at this stage. The core normalizer avoids high-level editor round-trips so unknown/vendor OOXML parts can remain untouched.
+
+## Strict mode
+
+Strict mode is intended for publishing pipelines where unresolved portability must stop the build. It can reject:
+
+- unsupported Strict -> Transitional conversion;
+- missing target fonts when a font inventory is supplied/required;
+- high-risk constructs such as `altChunk`, ActiveX, embedded OLE/packages or external links;
+- style inheritance cycles and other high-risk format diagnostics;
+- semantic-color symbols that remain because transforming the containing run would be destructive.
+
+## Safety properties
+
+- no LibreOffice/ONLYOFFICE/Microsoft Office editor round-trip;
+- input and output paths must differ;
+- same package part set after writing;
+- relationship parts unchanged unless a future rule explicitly owns them;
+- `[Content_Types].xml` unchanged unless a future rule explicitly owns it;
+- ZIP integrity verified;
+- postflight analysis always reruns;
+- theme materialization only when a value is unambiguous;
+- theme colors carrying unsupported transforms remain untouched;
+- risky structures are preserved + reported instead of flattened.
+
+## Development
 
 ```bash
 python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-Basic normalization:
+The normalization engine uses the Python standard library; portable builds additionally bundle the self-contained Open XML SDK validator.
 
-```bash
-ooxml-compat-normalize input.docx output.docx
-```
+## Roadmap
 
-Custom exact font mapping:
+The next major rules are expected to focus on:
 
-```bash
-ooxml-compat-normalize input.pptx output.pptx \
-  --font-map 'Arial=Liberation Sans'
-```
-
-The input and output remain in the same document family: DOCX stays DOCX, XLSX stays XLSX and PPTX stays PPTX. The project is a compatibility normalizer, not a semantic DOCX-to-XLSX or PPTX-to-DOCX converter.
-
-## Safety principles
-
-- input and output are separate files;
-- office documents are not opened and re-saved through LibreOffice, ONLYOFFICE or Microsoft Office;
-- unmodified package entries are preserved whenever possible;
-- transformations are limited to known OOXML structures;
-- relationships and content types are preservation targets;
-- unsupported structures should be reported instead of silently flattened;
-- normalization should be followed by a post-flight verification step;
-- a compatibility rule must not globally replace arbitrary text inside XML.
-
-## Tooling
-
-The project intentionally keeps the core lightweight.
-
-- **Python 3** — implementation language.
-- **Python standard library** — ZIP/OPC package handling, XML/text processing, hashing and CLI support; the core is designed to avoid mandatory heavy runtime dependencies.
-- **Tkinter** — lightweight graphical interface for the portable desktop application.
-- **PyInstaller** — used only at build time to create standalone Windows and Linux executables; it is not required by the normalizer runtime when installed as a Python package.
-- **GitHub Actions** — intended to build and publish reproducible portable binaries for supported platforms.
-
-LibreOffice, ONLYOFFICE and Microsoft Office are **compatibility targets**, not bundled conversion engines.
-
-The project does not bundle Open XML SDK, OpenXmlPowerTools, office suites, proprietary Microsoft fonts or font binaries.
-
-## Testing
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-Regression tests should use synthetic fixtures or documents whose redistribution is permitted. Real interoperability failures should be reduced to focused fixtures whenever possible.
-
-## Scope and limitations
-
-This project is not an OOXML renderer and cannot promise identical pagination or pixel output on every office suite and operating system.
-
-Its objective is narrower and testable: **reduce avoidable OOXML interoperability differences without unnecessarily rebuilding the document**.
-
-Complex features such as embedded objects, ActiveX, macros, SmartArt, external links, proprietary extensions or unsupported renderer behavior may need to be preserved and reported rather than transformed.
+1. more complete Word table width/cell margin/section compatibility fixtures;
+2. safe style inheritance materialization for verified Word style classes;
+3. full OOXML theme color transform evaluation (tint/shade/luminance/alpha);
+4. Excel date/locale/number-format interoperability fixtures;
+5. conditional-format equivalence checks and drawing-anchor regression fixtures;
+6. PowerPoint master/layout resolution per slide rather than only package-wide unambiguous theme values;
+7. PowerPoint autofit/text metric regression rules;
+8. optional renderer-comparison harnesses outside the core normalizer.
 
 ## License
 
-The source code of **docx-compat-normalizer** is released under the **MIT License**. See [`LICENSE`](LICENSE).
+The project source code is **MIT licensed**. The portable distribution is intentionally built only from free/open-source components:
 
-The project does not redistribute LibreOffice, ONLYOFFICE, Microsoft Office, Microsoft proprietary fonts or other office-suite binaries. References to third-party font families or office applications are interoperability references only unless explicitly stated otherwise.
+- **Microsoft Open XML SDK** — MIT;
+- **.NET runtime** — MIT and associated third-party notices;
+- **Python** — Python Software Foundation License;
+- **Tcl/Tk / Tkinter runtime components** — permissive Tcl/Tk license terms;
+- **PyInstaller** — GPLv2 with the PyInstaller bootloader exception that permits distributing bundled applications under the application's own license.
 
-Build-time tooling such as PyInstaller keeps its own upstream license and is not incorporated into the project source license merely because it is used to produce an executable. Any future third-party dependency or redistributed component must be documented separately in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and, where applicable, in [`docs/licensing.md`](docs/licensing.md).
+LibreOffice, ONLYOFFICE and Microsoft Office are interoperability targets only: their binaries are not linked, invoked or redistributed by the normalizer. Fonts are not bundled; optional font mappings only change OOXML family names.
+
+See [`LICENSE`](LICENSE), [`docs/licensing.md`](docs/licensing.md) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

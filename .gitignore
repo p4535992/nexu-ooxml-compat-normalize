@@ -11,3 +11,6 @@ dist/
 *.normalized.xlsx
 *.normalized.pptx
 *.json
+
+.build-venv/
+*.spec

@@ -26,22 +26,44 @@ POST /api/normalize?profile=interop-transitional-v1
 
 ## Logs
 
-Container logs produced by Quarkus are persisted on the host under:
+Quarkus writes its rotating file log to:
 
 ```text
-./docker-data/logs/ooxml-compat-normalize-quarkus.log
+/data/logs/ooxml-compat-normalize-quarkus.log
 ```
 
-Docker stdout/stderr remains available through:
+The `/data/logs` directory is backed by the Docker named volume `ooxml-logs`, so logs survive normal container recreation and `docker compose down`.
+
+Follow stdout/stderr with:
 
 ```bash
 docker compose logs -f normalizer
 ```
 
+Inspect the persistent file inside the running container with:
+
+```bash
+docker compose exec normalizer cat /data/logs/ooxml-compat-normalize-quarkus.log
+```
+
+Copy it to the current host directory when needed:
+
+```bash
+docker compose cp normalizer:/data/logs/ooxml-compat-normalize-quarkus.log ./
+```
+
 ## Stop
+
+Stop/remove containers and the Compose network while preserving the named log volume:
 
 ```bash
 docker compose down
+```
+
+To deliberately delete the persistent log volume too:
+
+```bash
+docker compose down -v
 ```
 
 ## Change host port
@@ -61,8 +83,9 @@ To intentionally bind to another host interface, set `OOXML_BIND_ADDRESS` explic
 - the application process runs as numeric user `10001`, not root;
 - `no-new-privileges` is enabled by Compose;
 - browser auto-open is disabled in the container;
-- only the HTTP port and the persistent log directory are exposed by default;
-- uploaded OOXML files are processed through the existing Quarkus temporary-file flow and are not intentionally persisted in the mounted log directory.
+- the host HTTP port is bound to `127.0.0.1` by default;
+- the persistent log directory uses a Docker named volume rather than a host bind mount, avoiding host ownership mismatches while keeping the process non-root;
+- uploaded OOXML files are processed through the existing Quarkus temporary-file flow and are not intentionally persisted in the log volume.
 
 ## Build/runtime images and licensing
 
@@ -70,4 +93,4 @@ The image is built locally with the Docker Official `maven` image using Eclipse 
 
 The project does not currently publish a prebuilt Docker image. `docker compose up --build` therefore pulls the upstream build/runtime images and builds this project's image locally.
 
-The final image includes this project's `LICENSE`, `THIRD_PARTY_NOTICES.md` and `THIRD_PARTY_LICENSES.md` under `/app/licenses`. The Eclipse Temurin/OpenJDK base image retains its own upstream runtime legal material. See `docs/licensing.md` for the project-level licensing summary.
+The final image includes this project's `LICENSE`, `THIRD_PARTY_NOTICES.md` and `THIRD_PARTY_LICENSES.md` under `/app/licenses`. The Eclipse Temurin/OpenJDK base image retains its own upstream runtime legal material under the JRE's `legal/` directory. See `docs/licensing.md` and `docs/licensing-audit.md` for the project-level licensing summary/checklist.

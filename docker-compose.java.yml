@@ -1,0 +1,24 @@
+name: ooxml-compat-normalize-java
+
+services:
+  normalizer-java:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ooxml-compat-normalize-java:local
+    ports:
+      - "${OOXML_BIND_ADDRESS:-127.0.0.1}:${OOXML_PORT:-8080}:8080"
+    environment:
+      QUARKUS_HTTP_HOST: "0.0.0.0"
+      QUARKUS_HTTP_PORT: "8080"
+      OOXML_LOG_FILE: "/data/logs/ooxml-compat-normalize-quarkus.log"
+      OOXML_OPEN_BROWSER: "false"
+    volumes:
+      - ooxml-java-logs:/data/logs
+    init: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  ooxml-java-logs:

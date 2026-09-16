@@ -1,0 +1,25 @@
+name: ooxml-compat-normalize-python
+
+services:
+  normalizer-python:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    image: ooxml-compat-normalize-python:local
+    ports:
+      - "${OOXML_BIND_ADDRESS:-127.0.0.1}:${OOXML_PORT:-8080}:8080"
+    environment:
+      OOXML_HTTP_HOST: "0.0.0.0"
+      OOXML_HTTP_PORT: "8080"
+      OOXML_LOG_FILE: "/data/logs/ooxml-compat-normalize-python.log"
+      OOXML_OPENXML_VALIDATOR: "/app/validator/OpenXmlSdkValidator"
+      OOXML_SDK_VALIDATION: "required"
+    volumes:
+      - ooxml-python-logs:/data/logs
+    init: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  ooxml-python-logs:

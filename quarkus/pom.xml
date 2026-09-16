@@ -36,6 +36,16 @@
       <groupId>io.github.p4535992</groupId>
       <artifactId>ooxml-compat-normalize-java</artifactId>
       <version>0.4.0-rc.8</version>
+      <!-- docx4j brings jcl-over-slf4j for standalone use. Quarkus already
+           provides its own Commons Logging -> JBoss Logging bridge, so keeping
+           both would put duplicate org.apache.commons.logging classes in the
+           uber-JAR. The standalone Java core keeps its original dependency. -->
+      <exclusions>
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>jcl-over-slf4j</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <dependency>
       <groupId>io.quarkus</groupId>

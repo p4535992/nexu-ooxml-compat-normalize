@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS validator-build
+WORKDIR /workspace
+COPY dotnet/OpenXmlSdkValidator/ dotnet/OpenXmlSdkValidator/
+RUN dotnet publish dotnet/OpenXmlSdkValidator/OpenXmlSdkValidator.csproj \
+    -c Release \
+    -r linux-x64 \
+    --self-contained true \
+    -p:PublishSingleFile=true \
+    -p:IncludeNativeLibrariesForSelfExtract=true \
+    -p:DebugType=None \
+    -p:DebugSymbols=false \
+    -o /out/validator
+
+FROM python:3.12-slim
+
+LABEL org.opencontainers.image.title="OOXML Compat Normalize - Python" \
+      org.opencontainers.image.description="OOXML normalization web/API service using the Python engine" \
+      org.opencontainers.image.source="https://github.com/p4535992/ooxml-compat-normalize"
+
+WORKDIR /app
+
+COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md ./
+COPY src/ src/
+COPY --from=validator-build /out/validator/OpenXmlSdkValidator /app/validator/OpenXmlSdkValidator
+
+RUN python -m pip install --no-cache-dir . \
+    && mkdir -p /data/logs \
+    && chmod +x /app/validator/OpenXmlSdkValidator \
+    && chown -R 10001:0 /app /data \
+    && chmod -R g=u /app /data
+
+ENV OOXML_HTTP_HOST=0.0.0.0 \
+    OOXML_HTTP_PORT=8080 \
+    OOXML_LOG_FILE=/data/logs/ooxml-compat-normalize-python.log \
+    OOXML_OPENXML_VALIDATOR=/app/validator/OpenXmlSdkValidator \
+    OOXML_SDK_VALIDATION=required \
+    PYTHONUNBUFFERED=1
+
+USER 10001
+EXPOSE 8080
+
+ENTRYPOINT ["python", "-m", "ooxml_compat_normalize.web_server"]

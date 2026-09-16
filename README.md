@@ -138,16 +138,17 @@ ooxml-compat-normalize input.docx output.docx \
   --report output.report.json
 ```
 
-## Portable desktop application
+## Python desktop portable
 
 The Tkinter GUI supports selecting one or more `.docx`, `.xlsx` or `.pptx` files, choosing the normalization profile and font policy, and writing JSON reports.
 
-Windows/Linux desktop portable builds embed a self-contained **.NET / Microsoft Open XML SDK** validator. End users do not need Python or .NET installed.
+Windows/Linux Python portable builds embed a self-contained **.NET / Microsoft Open XML SDK** validator. End users do not need Python or .NET installed.
+
+The release names always include `python` explicitly:
 
 ```text
-DOCX → DOCX
-XLSX → XLSX
-PPTX → PPTX
+OOXML-Compat-Normalize-python-portable-win-x64.zip
+OOXML-Compat-Normalize-python-portable-linux-x64.tar.gz
 ```
 
 See [`portable/README.md`](portable/README.md).
@@ -164,29 +165,30 @@ It uses:
 
 POI/docx4j are used for **pre-flight and post-flight parsing/validation**, not to re-save the complete document.
 
-The Maven module produces two artifacts during development:
-
-- a normal thin library JAR used by other Java modules;
-- an executable shaded `-all.jar` used to create the release artifact `ooxml-compat-normalize-java.jar`.
-
 Build locally:
 
 ```bash
 mvn -f java/pom.xml clean install
 ```
 
-Release-style CLI usage:
+The standalone release artifact is named explicitly:
+
+```text
+OOXML-Compat-Normalize-java-core.jar
+```
+
+Usage:
 
 ```bash
-java -jar ooxml-compat-normalize-java.jar input.docx output.docx
-java -jar ooxml-compat-normalize-java.jar input.xlsx --audit-only
+java -jar OOXML-Compat-Normalize-java-core.jar input.docx output.docx
+java -jar OOXML-Compat-Normalize-java-core.jar input.xlsx --audit-only
 ```
 
 See [`java/README.md`](java/README.md).
 
 ## Quarkus local service
 
-A very small **Quarkus 3.39.3** application exposes the same Java core through a local web UI and REST API. It does not implement a separate normalization engine.
+A small **Quarkus 3.39.3** application exposes the same Java core through a local web UI and REST API. It does not implement a separate normalization engine.
 
 By default it binds only to:
 
@@ -194,10 +196,16 @@ By default it binds only to:
 127.0.0.1:8080
 ```
 
-Run the release JAR:
+The raw release JAR is:
+
+```text
+OOXML-Compat-Normalize-java-quarkus.jar
+```
+
+Run it with Java 17+:
 
 ```bash
-java -jar ooxml-compat-normalize-quarkus.jar
+java -jar OOXML-Compat-Normalize-java-quarkus.jar
 ```
 
 Then open:
@@ -212,50 +220,87 @@ Available endpoints:
 - `POST /api/audit`
 - `POST /api/normalize?profile=interop-transitional-v1`
 
-The Quarkus artifact is built as a single executable **uber-JAR**. See [`quarkus/README.md`](quarkus/README.md).
+### Diagnostic logging
 
-## Portable Java distribution
-
-For machines where Java is not installed, releases also contain Java portable packages for Windows and Linux. Each package bundles a Java 17 runtime created with `jlink` plus **both** Java applications:
+The Quarkus service writes a rotating diagnostic log. By default:
 
 ```text
-runtime/
-ooxml-compat-normalize-java.jar
-ooxml-compat-normalize-quarkus.jar
+${user.home}/ooxml-compat-normalize-quarkus.log
 ```
 
-Windows launchers:
+The default rotation policy is 10 MB × 5 backups and rotate-on-start. Set `OOXML_LOG_FILE` to choose another path. Logs include startup, audit/normalization operations, selected profile, validation status and error information; the application does not intentionally log document contents.
+
+See [`quarkus/README.md`](quarkus/README.md) and `quarkus/jpackage/LOGS.txt`.
+
+## Java portable distribution and Windows EXE
+
+For machines where Java is not installed, releases contain Java portable packages for Windows and Linux. Both include a Java 17 runtime plus the **core JAR and Quarkus JAR**.
+
+Release names:
+
+```text
+OOXML-Compat-Normalize-java-portable-win-x64.zip
+OOXML-Compat-Normalize-java-portable-linux-x64.tar.gz
+```
+
+On Windows the portable package is built with **jpackage**, following the same delivery pattern used by the NexU project. It contains a real executable launcher:
+
+```text
+OOXML-Compat-Normalize-Quarkus.exe
+```
+
+and also a core CLI launcher:
 
 ```text
 ooxml-normalize.cmd
-ooxml-quarkus.cmd
 ```
 
-Linux launchers:
+The same build also creates a Windows per-user installer:
 
 ```text
-ooxml-normalize
-ooxml-quarkus
+OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe
 ```
 
-So the same portable package can be used either as a CLI normalizer or as the local Quarkus web service, without installing Java globally.
+The installer adds the normal Windows launcher/shortcut while preserving the same localhost-only Quarkus behavior and file logging.
 
-## Release artifacts
+On Linux the portable contains:
+
+```text
+runtime/
+OOXML-Compat-Normalize-java-core.jar
+OOXML-Compat-Normalize-java-quarkus.jar
+ooxml-normalize
+ooxml-quarkus
+LOGS.txt
+```
+
+No global Java installation is required for either portable package.
+
+## Release artifact naming
+
+Artifact names follow this rule:
+
+```text
+OOXML-Compat-Normalize-<runtime>-<variant>-<os>-<arch>.<ext>
+```
 
 A full release is expected to contain:
 
 ```text
-# Desktop Python/.NET portable
-OOXML-Compat-Normalize-win-x64.zip
-OOXML-Compat-Normalize-linux-x64.tar.gz
+# Python desktop
+OOXML-Compat-Normalize-python-portable-win-x64.zip
+OOXML-Compat-Normalize-python-portable-linux-x64.tar.gz
 
-# Raw Java artifacts
-ooxml-compat-normalize-java.jar
-ooxml-compat-normalize-quarkus.jar
+# Raw Java
+OOXML-Compat-Normalize-java-core.jar
+OOXML-Compat-Normalize-java-quarkus.jar
 
-# Java runtime bundled portables
+# Java with bundled runtime
 OOXML-Compat-Normalize-java-portable-win-x64.zip
 OOXML-Compat-Normalize-java-portable-linux-x64.tar.gz
+
+# Windows Quarkus installer
+OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe
 
 SHA256SUMS.txt
 ```
@@ -267,14 +312,15 @@ All artifacts in a release are built from the same commit by GitHub Actions.
 The project deliberately separates normalization from validation and delivery:
 
 - **Python standard library** — primary package-preserving normalization/audit engine;
-- **Microsoft Open XML SDK** — independent structural validation embedded in desktop portable builds;
+- **Microsoft Open XML SDK** — independent structural validation embedded in Python desktop portable builds;
 - **.NET self-contained publish** — bundles that validator without requiring a .NET installation;
-- **Tkinter + PyInstaller** — desktop GUI and one-file Windows/Linux distributions;
+- **Tkinter + PyInstaller** — Python desktop GUI and one-file Windows/Linux distributions;
 - **Apache POI 5.5.1** — Java cross-format OPC/OOXML parser;
 - **docx4j 17.1.0** — independent Java OOXML parser/model;
 - **Quarkus 3.39.3 / Quarkus REST Jackson** — local Java web/API wrapper around the Java core;
 - **Maven + Maven Shade Plugin** — Java library, executable core JAR and Quarkus build;
-- **Eclipse Temurin/OpenJDK 17 + jlink** — bundled Java runtime for Windows/Linux Java portable distributions;
+- **Eclipse Temurin/OpenJDK 17 + jlink** — bundled Java runtime;
+- **jpackage + WiX** — Windows Java app-image, `.exe` launcher and installer;
 - **GitHub Actions / GitHub CLI** — reproducible builds, checksums and release publication.
 
 ## Safety properties
@@ -327,13 +373,13 @@ mvn -f quarkus/pom.xml clean verify package
 
 The project source code is **MIT licensed**. Runtime/build dependencies are free/open source.
 
-Desktop portable builds use Microsoft Open XML SDK (MIT), .NET, Python, Tcl/Tk and PyInstaller under their respective licenses.
+Python desktop portable builds use Microsoft Open XML SDK (MIT), .NET, Python, Tcl/Tk and PyInstaller under their respective licenses.
 
 The Java core uses **Apache POI 5.5.1** and **docx4j 17.1.0**, both Apache License 2.0, plus their Maven-resolved transitive open-source dependencies.
 
 The Quarkus local service uses **Quarkus 3.39.3**, licensed under Apache License 2.0, plus compatible open-source dependencies.
 
-Java portable distributions bundle a `jlink` runtime derived from **Eclipse Temurin/OpenJDK 17**. OpenJDK is distributed under **GPL-2.0 with the Classpath Exception**, plus the applicable third-party notices. This does not change the MIT license of this project's source code, but the runtime's license/notices travel with the portable distribution.
+Java portable distributions bundle a runtime derived from **Eclipse Temurin/OpenJDK 17**. OpenJDK is distributed under **GPL-2.0 with the Classpath Exception**, plus the applicable third-party notices. This does not change the MIT license of this project's source code, but the runtime's license/notices travel with the portable distribution.
 
 LibreOffice, ONLYOFFICE and Microsoft Office are interoperability peers only: their binaries are not linked, invoked or redistributed. Font binaries are not bundled.
 

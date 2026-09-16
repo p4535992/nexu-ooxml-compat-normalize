@@ -1,0 +1,15 @@
+ooxml-compat-normalize Java companion - third-party notices
+
+Apache POI 5.5.1
+Copyright The Apache Software Foundation
+License: Apache License 2.0
+https://poi.apache.org/
+
+Docx4j 17.1.0
+Copyright Plutext Pty Ltd and contributors
+License: Apache License 2.0
+https://www.docx4java.org/
+
+The shaded JAR may include transitive dependencies under their respective open-source licenses.
+Maven dependency metadata and META-INF license/notice resources remain part of the build inputs.
+See the repository THIRD_PARTY_NOTICES.md and THIRD_PARTY_LICENSES.md for project-level notices.

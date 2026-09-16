@@ -65,8 +65,8 @@ jobs:
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
 
-  build:
-    name: Build desktop ${{ matrix.rid }}
+  build_python:
+    name: Build Python desktop ${{ matrix.rid }}
     needs: release_config
     strategy:
       fail-fast: false
@@ -74,17 +74,17 @@ jobs:
         include:
           - os: windows-latest
             rid: win-x64
-            artifact: OOXML-Compat-Normalize-win-x64
+            artifact: OOXML-Compat-Normalize-python-portable-win-x64
             validator: dotnet/OpenXmlSdkValidator/bin/Release/net8.0/win-x64/publish/OpenXmlSdkValidator.exe
           - os: ubuntu-22.04
             rid: linux-x64
-            artifact: OOXML-Compat-Normalize-linux-x64
+            artifact: OOXML-Compat-Normalize-python-portable-linux-x64
             validator: dotnet/OpenXmlSdkValidator/bin/Release/net8.0/linux-x64/publish/OpenXmlSdkValidator
     runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -139,7 +139,7 @@ jobs:
           ls -lah dist
           test -n "$(find dist -maxdepth 1 -type f -name 'OOXML-Compat-Normalize*' -print -quit)"
 
-      - name: Prepare portable payload
+      - name: Prepare Python portable payload
         shell: bash
         run: |
           set -euo pipefail
@@ -157,7 +157,7 @@ jobs:
           (base / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
 
-      - name: Upload portable artifact
+      - name: Upload Python portable artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -171,10 +171,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -199,27 +199,42 @@ jobs:
         shell: bash
         run: mvn -B -ntp -f quarkus/pom.xml clean verify package
 
-      - name: Smoke-test Quarkus uber-JAR
+      - name: Smoke-test Quarkus uber-JAR and diagnostic log
         shell: bash
         run: |
           set -euo pipefail
           QUARKUS_JAR="$(find quarkus/target -maxdepth 1 -type f -name '*-runner.jar' -print -quit)"
           test -n "$QUARKUS_JAR"
-          java -jar "$QUARKUS_JAR" >/tmp/ooxml-quarkus.log 2>&1 &
+          LOG_FILE="$RUNNER_TEMP/ooxml-quarkus-smoke.log"
+          rm -f "$LOG_FILE"
+          OOXML_LOG_FILE="$LOG_FILE" QUARKUS_HTTP_PORT=18080 \
+            java -jar "$QUARKUS_JAR" >"$RUNNER_TEMP/ooxml-quarkus-console.log" 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/api/info >/tmp/ooxml-info.json; then
-              cat /tmp/ooxml-info.json
-              kill "$PID" 2>/dev/null || true
-              wait "$PID" 2>/dev/null || true
-              trap - EXIT
-              exit 0
+          started=false
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18080/api/info >"$RUNNER_TEMP/ooxml-info.json"; then
+              started=true
+              break
             fi
+            if ! kill -0 "$PID" 2>/dev/null; then break; fi
             sleep 1
           done
-          cat /tmp/ooxml-quarkus.log
-          exit 1
+          if [[ "$started" != true ]]; then
+            cat "$RUNNER_TEMP/ooxml-quarkus-console.log"
+            [[ -f "$LOG_FILE" ]] && cat "$LOG_FILE"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/ooxml-info.json"
+          for i in $(seq 1 20); do
+            [[ -s "$LOG_FILE" ]] && break
+            sleep 0.25
+          done
+          test -s "$LOG_FILE"
+          grep -q 'OOXML Compat Normalize Quarkus local service started' "$LOG_FILE"
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null || true
+          trap - EXIT
 
       - name: Prepare Java JAR payload
         shell: bash
@@ -228,10 +243,11 @@ jobs:
           mkdir -p java-jars
           CORE_JAR="$(find java/target -maxdepth 1 -type f -name '*-all.jar' -print -quit)"
           QUARKUS_JAR="$(find quarkus/target -maxdepth 1 -type f -name '*-runner.jar' -print -quit)"
-          cp "$CORE_JAR" java-jars/ooxml-compat-normalize-java.jar
-          cp "$QUARKUS_JAR" java-jars/ooxml-compat-normalize-quarkus.jar
+          cp "$CORE_JAR" java-jars/OOXML-Compat-Normalize-java-core.jar
+          cp "$QUARKUS_JAR" java-jars/OOXML-Compat-Normalize-java-quarkus.jar
           cp java/README.md java-jars/JAVA-README.md
           cp quarkus/README.md java-jars/QUARKUS-README.md
+          cp quarkus/jpackage/LOGS.txt java-jars/LOGS.txt
           cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md java-jars/
           sha256sum java-jars/*.jar > java-jars/SHA256SUMS-java.txt
 
@@ -259,10 +275,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -273,7 +289,79 @@ jobs:
           name: OOXML-Compat-Normalize-java-jars
           path: java-jars
 
-      - name: Build bundled Java runtime
+      - name: Ensure WiX Toolset is available
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
+          if (-not $candle) {
+            choco install wixtoolset --yes --no-progress
+            $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+            $wixPattern = Join-Path $programFilesX86 'WiX Toolset v3.*\bin'
+            $wixBin = Get-ChildItem -Path $wixPattern -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $wixBin) { throw 'WiX Toolset installation directory was not found' }
+            $wixBin.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+      - name: Build Windows Java portable and Quarkus EXE installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./quarkus/jpackage/package-windows.ps1 `
+            -QuarkusJar java-jars/OOXML-Compat-Normalize-java-quarkus.jar `
+            -CoreJar java-jars/OOXML-Compat-Normalize-java-core.jar `
+            -Destination quarkus/target/jpackage `
+            -AppVersion 0.4.0
+
+      - name: Smoke-test Windows packaged Quarkus EXE and log
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $app = Resolve-Path 'quarkus/target/jpackage/OOXML-Compat-Normalize-Quarkus/OOXML-Compat-Normalize-Quarkus.exe'
+          $log = Join-Path $env:RUNNER_TEMP 'ooxml-quarkus-exe-smoke.log'
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
+          $env:OOXML_LOG_FILE = $log
+          $env:QUARKUS_HTTP_PORT = '18081'
+          $process = Start-Process -FilePath $app -PassThru
+          try {
+            $started = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try {
+                $response = Invoke-RestMethod -Uri 'http://127.0.0.1:18081/api/info' -TimeoutSec 2
+                if ($response.name -eq 'ooxml-compat-normalize-quarkus') {
+                  $started = $true
+                  break
+                }
+              } catch {
+              }
+              if ($process.HasExited) { break }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $started) {
+              if (Test-Path $log) { Get-Content $log }
+              throw 'Packaged Quarkus EXE did not become ready'
+            }
+            for ($i = 0; $i -lt 20 -and -not (Test-Path $log); $i++) { Start-Sleep -Milliseconds 250 }
+            if (-not (Test-Path $log)) { throw 'Diagnostic log file was not created' }
+            $text = Get-Content $log -Raw
+            if ($text -notmatch 'OOXML Compat Normalize Quarkus local service started') {
+              throw 'Diagnostic log startup marker is missing'
+            }
+          }
+          finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - name: Prepare Windows Java artifact payload
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path java-portable-release -Force | Out-Null
+          Copy-Item quarkus/target/jpackage/OOXML-Compat-Normalize-java-portable-win-x64.zip java-portable-release/
+          Copy-Item quarkus/target/jpackage/OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe java-portable-release/
+
+      - name: Build Linux bundled Java runtime
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -286,44 +374,60 @@ jobs:
             --no-man-pages \
             --compress=2 \
             --output java-portable/runtime
-          cp java-jars/ooxml-compat-normalize-java.jar java-portable/
-          cp java-jars/ooxml-compat-normalize-quarkus.jar java-portable/
-          cp java-jars/JAVA-README.md java-jars/QUARKUS-README.md java-portable/
+          cp java-jars/OOXML-Compat-Normalize-java-core.jar java-portable/
+          cp java-jars/OOXML-Compat-Normalize-java-quarkus.jar java-portable/
+          cp java-jars/JAVA-README.md java-jars/QUARKUS-README.md java-jars/LOGS.txt java-portable/
           cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md java-portable/
-
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cat > java-portable/ooxml-normalize.cmd <<'EOF'
-          @echo off
-          "%~dp0runtime\bin\java.exe" -jar "%~dp0ooxml-compat-normalize-java.jar" %*
-          EOF
-            cat > java-portable/ooxml-quarkus.cmd <<'EOF'
-          @echo off
-          "%~dp0runtime\bin\java.exe" -jar "%~dp0ooxml-compat-normalize-quarkus.jar" %*
-          EOF
-          else
-            cat > java-portable/ooxml-normalize <<'EOF'
+          cat > java-portable/ooxml-normalize <<'EOF'
           #!/usr/bin/env sh
           DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-          exec "$DIR/runtime/bin/java" -jar "$DIR/ooxml-compat-normalize-java.jar" "$@"
+          exec "$DIR/runtime/bin/java" -jar "$DIR/OOXML-Compat-Normalize-java-core.jar" "$@"
           EOF
-            cat > java-portable/ooxml-quarkus <<'EOF'
+          cat > java-portable/ooxml-quarkus <<'EOF'
           #!/usr/bin/env sh
           DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-          exec "$DIR/runtime/bin/java" -jar "$DIR/ooxml-compat-normalize-quarkus.jar" "$@"
+          exec "$DIR/runtime/bin/java" -jar "$DIR/OOXML-Compat-Normalize-java-quarkus.jar" "$@"
           EOF
-            chmod +x java-portable/ooxml-normalize java-portable/ooxml-quarkus
-          fi
+          chmod +x java-portable/ooxml-normalize java-portable/ooxml-quarkus
 
-      - name: Smoke-test Java portable core
+      - name: Smoke-test Linux Java portable core and Quarkus log
+        if: runner.os == 'Linux'
         shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            java-portable/runtime/bin/java.exe -jar java-portable/ooxml-compat-normalize-java.jar --help
-          else
-            java-portable/runtime/bin/java -jar java-portable/ooxml-compat-normalize-java.jar --help
+          set -euo pipefail
+          java-portable/ooxml-normalize --help
+          LOG_FILE="$RUNNER_TEMP/ooxml-quarkus-portable.log"
+          rm -f "$LOG_FILE"
+          OOXML_LOG_FILE="$LOG_FILE" QUARKUS_HTTP_PORT=18082 java-portable/ooxml-quarkus >"$RUNNER_TEMP/ooxml-quarkus-portable-console.log" 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          started=false
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18082/api/info >/dev/null; then started=true; break; fi
+            if ! kill -0 "$PID" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [[ "$started" != true ]]; then
+            cat "$RUNNER_TEMP/ooxml-quarkus-portable-console.log"
+            [[ -f "$LOG_FILE" ]] && cat "$LOG_FILE"
+            exit 1
           fi
+          test -s "$LOG_FILE"
+          grep -q 'OOXML Compat Normalize Quarkus local service started' "$LOG_FILE"
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null || true
+          trap - EXIT
 
-      - name: Upload Java portable
+      - name: Upload Windows Java portable and installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: java-portable-release/
+          if-no-files-found: error
+
+      - name: Upload Linux Java portable
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -333,7 +437,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: needs.release_config.outputs.publish == 'true'
-    needs: [release_config, build, java, java_portable]
+    needs: [release_config, build_python, java, java_portable]
     runs-on: ubuntu-latest
 
     steps:
@@ -351,26 +455,27 @@ jobs:
             [ -d "$dir" ] || continue
             case "$dir" in
               OOXML-Compat-Normalize-java-jars)
-                cp "$dir/ooxml-compat-normalize-java.jar" ./ooxml-compat-normalize-java.jar
-                cp "$dir/ooxml-compat-normalize-quarkus.jar" ./ooxml-compat-normalize-quarkus.jar
+                cp "$dir/OOXML-Compat-Normalize-java-core.jar" ./OOXML-Compat-Normalize-java-core.jar
+                cp "$dir/OOXML-Compat-Normalize-java-quarkus.jar" ./OOXML-Compat-Normalize-java-quarkus.jar
                 ;;
               OOXML-Compat-Normalize-java-portable-win-x64)
-                (cd "$dir" && zip -9 -r "../${dir}.zip" .)
+                cp "$dir/OOXML-Compat-Normalize-java-portable-win-x64.zip" ./
+                cp "$dir/OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe" ./
                 ;;
               OOXML-Compat-Normalize-java-portable-linux-x64)
                 chmod +x "$dir/ooxml-normalize" "$dir/ooxml-quarkus" || true
-                (cd "$dir" && tar -czf "../${dir}.tar.gz" .)
+                (cd "$dir" && tar -czf "../OOXML-Compat-Normalize-java-portable-linux-x64.tar.gz" .)
                 ;;
-              *win-x64)
-                (cd "$dir" && zip -9 -r "../${dir}.zip" .)
+              OOXML-Compat-Normalize-python-portable-win-x64)
+                (cd "$dir" && zip -9 -r "../OOXML-Compat-Normalize-python-portable-win-x64.zip" .)
                 ;;
-              *linux-x64)
+              OOXML-Compat-Normalize-python-portable-linux-x64)
                 chmod +x "$dir/OOXML-Compat-Normalize" || true
-                (cd "$dir" && tar -czf "../${dir}.tar.gz" .)
+                (cd "$dir" && tar -czf "../OOXML-Compat-Normalize-python-portable-linux-x64.tar.gz" .)
                 ;;
             esac
           done
-          sha256sum *.zip *.tar.gz *.jar > SHA256SUMS.txt
+          sha256sum *.zip *.tar.gz *.jar *.exe > SHA256SUMS.txt
 
       - name: Create GitHub Release and tag
         shell: bash
@@ -388,6 +493,7 @@ jobs:
             release/*.zip \
             release/*.tar.gz \
             release/*.jar \
+            release/*.exe \
             release/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \

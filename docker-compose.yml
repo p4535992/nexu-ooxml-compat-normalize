@@ -14,8 +14,11 @@ services:
       OOXML_LOG_FILE: "/data/logs/ooxml-compat-normalize-quarkus.log"
       OOXML_OPEN_BROWSER: "false"
     volumes:
-      - ./docker-data/logs:/data/logs
+      - ooxml-logs:/data/logs
     init: true
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  ooxml-logs:

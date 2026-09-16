@@ -50,12 +50,14 @@
       <artifactId>log4j-to-slf4j</artifactId>
       <version>${log4j.version}</version>
       <scope>runtime</scope>
+      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-nop</artifactId>
       <version>${slf4j.version}</version>
       <scope>runtime</scope>
+      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>

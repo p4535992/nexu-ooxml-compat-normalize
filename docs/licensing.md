@@ -2,37 +2,53 @@
 
 The project source code is licensed under the **MIT License**.
 
-The portable binaries are intentionally built from free/open-source components. The goal is to keep the normalizer redistributable without requiring proprietary office-suite libraries.
+Release artifacts are intentionally built from free/open-source components. The goal is to keep the normalizer redistributable without requiring proprietary office-suite libraries.
 
-## Normalization engine
+## Python/Desktop normalization engine
 
-The package-preserving normalization engine is Python code from this project and uses the Python standard library for ZIP/OPC handling, XML inspection, hashing, CLI and the Tkinter GUI.
+The package-preserving Python normalization engine uses the Python standard library for ZIP/OPC handling, XML inspection, hashing, CLI and the Tkinter GUI.
 
 Python is distributed under the Python Software Foundation License. Tk/Tcl components used by Tkinter have permissive Tcl/Tk licensing terms.
 
-## Microsoft Open XML SDK
+## Microsoft Open XML SDK and .NET
 
-Portable builds bundle a small self-contained .NET helper that references **DocumentFormat.OpenXml (Microsoft Open XML SDK)**.
+Desktop portable builds bundle a small self-contained .NET helper referencing **DocumentFormat.OpenXml (Microsoft Open XML SDK)**.
 
-Open XML SDK is MIT licensed. It is used as an independent structural validator for DOCX, XLSX and PPTX before and after our own loss-averse normalization rules. It is **not** used to perform an editor-style open/save round-trip.
-
-The helper is published self-contained, so an end user does not need to install .NET separately.
-
-## .NET runtime
-
-The self-contained helper includes the .NET runtime components required by the selected Runtime Identifier (for example `win-x64` or `linux-x64`). .NET runtime source is MIT licensed and the distribution carries additional third-party notices from the .NET project. Release engineering should retain the applicable notices for the exact .NET version used by the build.
+Open XML SDK is MIT licensed and is used as an independent structural validator before and after normalization. The self-contained .NET runtime is MIT licensed together with the applicable .NET third-party notices.
 
 ## PyInstaller
 
-PyInstaller is used to produce the final one-file GUI application and bundles the Python runtime plus the self-contained Open XML SDK helper.
+PyInstaller produces the one-file desktop application. It is GPLv2 with the PyInstaller bootloader exception that permits distributing bundled applications under the application's own license, subject to the authoritative upstream terms.
 
-PyInstaller is GPLv2 with a **special bootloader exception** intended to allow applications built with PyInstaller to be distributed under the application's own license. Always retain/check the authoritative license shipped with the exact PyInstaller version used by a release.
+## Java core
 
-PyInstaller does not require this project itself to become GPL merely because it is used to create the executable, subject to the upstream exception terms.
+The Java core is MIT-licensed project code. It uses:
+
+- **Apache POI 5.5.1** — Apache License 2.0;
+- **docx4j 17.1.0** — Apache License 2.0;
+- Maven-resolved transitive dependencies under their respective open-source licenses.
+
+POI and docx4j are used for independent pre-flight/post-flight parsing. The writer remains package-preserving and does not re-save the document through their high-level models.
+
+The Maven build creates a normal library JAR and a shaded executable JAR. The release publishes the executable JAR as `ooxml-compat-normalize-java.jar`.
+
+## Quarkus local service
+
+The Quarkus module is MIT-licensed project code using **Quarkus 3.39.3**, which is Apache License 2.0, plus Quarkus REST/Jackson and their compatible open-source transitive dependencies.
+
+The release publishes a single executable Quarkus uber-JAR named `ooxml-compat-normalize-quarkus.jar`. The service delegates all normalization to the Java core and binds to localhost by default.
+
+## Java portable runtime
+
+Windows/Linux Java portable archives contain both Java JARs plus a platform-specific runtime image created with `jlink` from Eclipse Temurin/OpenJDK 17.
+
+OpenJDK/Temurin runtime code is distributed under **GPL-2.0 with the Classpath Exception**, together with third-party notices applicable to the exact runtime build. The Classpath Exception allows applications to use/link the Java class libraries without changing this project's MIT source-code license.
+
+Redistributed runtime images must retain the authoritative OpenJDK/Temurin license and third-party notices that apply to the exact build used by CI.
 
 ## Office suites
 
-LibreOffice, ONLYOFFICE and Microsoft Office are compatibility targets, not linked or redistributed dependencies. The normalizer does not require their binaries to perform its package normalization.
+LibreOffice, ONLYOFFICE and Microsoft Office are compatibility peers/targets, not linked or redistributed dependencies. The normalizer does not require their binaries to perform package normalization.
 
 ## Fonts
 
@@ -40,6 +56,6 @@ Font programs are not bundled. The normalizer preserves font names by default an
 
 Deployers remain responsible for installing target fonts and complying with their licenses. Future font-embedding support must check embedding rights before embedding a font program in an OOXML package.
 
-## Development/test candidates
+## Additional research/test tooling
 
-OpenXmlPowerTools (MIT), Apache POI (Apache-2.0) and docx4j (Apache-2.0) may be used in future as additional cross-parser or regression-test tools. They are not runtime dependencies of the current portable build.
+OpenXmlPowerTools (MIT) may still be used as an additional regression/research tool, but is not currently a runtime dependency.

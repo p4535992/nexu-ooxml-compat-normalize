@@ -23,23 +23,23 @@ The build produces:
 java/target/ooxml-compat-normalize-java.jar
     thin library JAR used by the Quarkus module
 
-java/target/ooxml-compat-normalize-java-0.4.0-rc.5-all.jar
+java/target/ooxml-compat-normalize-java-0.4.0-rc.6-all.jar
     shaded executable CLI JAR
 ```
 
-The release workflow renames the shaded executable artifact to:
+The release workflow gives the executable core a deliberately explicit name:
 
 ```text
-ooxml-compat-normalize-java.jar
+OOXML-Compat-Normalize-java-core.jar
 ```
 
 ## Usage
 
 ```bash
-java -jar ooxml-compat-normalize-java.jar document.docx --audit-only
-java -jar ooxml-compat-normalize-java.jar input.docx output.docx
-java -jar ooxml-compat-normalize-java.jar input.xlsx output.xlsx --font-profile compat
-java -jar ooxml-compat-normalize-java.jar input.pptx output.pptx --font-map 'Old Font=New Font'
+java -jar OOXML-Compat-Normalize-java-core.jar document.docx --audit-only
+java -jar OOXML-Compat-Normalize-java-core.jar input.docx output.docx
+java -jar OOXML-Compat-Normalize-java-core.jar input.xlsx output.xlsx --font-profile compat
+java -jar OOXML-Compat-Normalize-java-core.jar input.pptx output.pptx --font-map 'Old Font=New Font'
 ```
 
 Default font behavior is preserve: explicitly declared font identities are not changed unless a mapping policy is requested.
@@ -66,6 +66,17 @@ other OOXML ----┘                         └---- other OOXML
 ## Consumers
 
 The thin JAR is reused directly by [`../quarkus`](../quarkus), so the Quarkus local service does not maintain a duplicate normalization implementation.
+
+## Release naming
+
+Java-related release files always contain `java` in their name. The core JAR is distinct from the Quarkus JAR and from the Java runtime-bundled portable packages:
+
+```text
+OOXML-Compat-Normalize-java-core.jar
+OOXML-Compat-Normalize-java-quarkus.jar
+OOXML-Compat-Normalize-java-portable-win-x64.zip
+OOXML-Compat-Normalize-java-portable-linux-x64.tar.gz
+```
 
 ## Licensing
 

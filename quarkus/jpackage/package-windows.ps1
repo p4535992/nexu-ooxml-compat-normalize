@@ -71,7 +71,9 @@ $ImageArguments = @(
     "--dest", $Destination,
     "--input", $InputDirectory,
     "--main-jar", $QuarkusName,
-    "--runtime-image", $RuntimeImage
+    "--runtime-image", $RuntimeImage,
+    "--java-options", '-Dquarkus.log.file.path=$APPDIR/logs/ooxml-compat-normalize-quarkus.log',
+    "--java-options", "-Dooxml.open-browser=true"
 )
 
 & $Jpackage @ImageArguments
@@ -83,6 +85,8 @@ Copy-Item -LiteralPath (Join-Path $ProjectRoot "LICENSE") -Destination (Join-Pat
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "THIRD_PARTY_NOTICES.md") -Destination (Join-Path $AppImage "THIRD_PARTY_NOTICES.md")
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "THIRD_PARTY_LICENSES.md") -Destination (Join-Path $AppImage "THIRD_PARTY_LICENSES.md")
 Copy-Item -LiteralPath (Join-Path $ScriptDirectory "LOGS.txt") -Destination (Join-Path $AppImage "LOGS.txt")
+New-Item -ItemType Directory -Path (Join-Path $AppImage "logs") -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $AppImage ".ooxml-portable") -Force | Out-Null
 
 $CoreLauncher = Join-Path $AppImage "ooxml-normalize.cmd"
 @'
@@ -104,6 +108,9 @@ if (-not (Test-Path -LiteralPath $CoreLauncher -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath (Join-Path $AppImage "LOGS.txt") -PathType Leaf)) {
     throw "LOGS.txt is missing from app image"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $AppImage "logs") -PathType Container)) {
+    throw "Portable logs directory is missing from app image"
 }
 
 if (Test-Path -LiteralPath $PortableArchive) {
@@ -148,4 +155,5 @@ Write-Host "Application image: $AppImage"
 Write-Host "Portable archive: $PortableArchive"
 Write-Host "Windows installer: $InstallerTarget"
 Write-Host "Primary launcher: $(Join-Path $AppImage "$AppName.exe")"
+Write-Host "Portable logs: $(Join-Path $AppImage 'logs')"
 Write-Host "Diagnostic log guide: $(Join-Path $AppImage 'LOGS.txt')"

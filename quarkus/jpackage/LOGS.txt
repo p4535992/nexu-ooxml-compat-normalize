@@ -1,0 +1,39 @@
+OOXML Compat Normalize - Quarkus diagnostic logs
+=================================================
+
+The Quarkus local service writes a rotating diagnostic log by default to:
+
+  ${user.home}/ooxml-compat-normalize-quarkus.log
+
+Examples:
+
+  Windows:
+    C:\Users\<user>\ooxml-compat-normalize-quarkus.log
+
+  Linux:
+    /home/<user>/ooxml-compat-normalize-quarkus.log
+
+Rotation policy
+---------------
+
+- maximum active log size: 10 MB
+- maximum backup files: 5
+- rotate on application start: enabled
+
+Custom log path
+---------------
+
+Set the environment variable OOXML_LOG_FILE before launching the JAR or the packaged application.
+
+Windows PowerShell example:
+
+  $env:OOXML_LOG_FILE = "$env:TEMP\ooxml-normalize.log"
+  .\OOXML-Compat-Normalize-Quarkus.exe
+
+Linux example:
+
+  OOXML_LOG_FILE=/tmp/ooxml-normalize.log ./ooxml-quarkus
+
+The log records startup, audit requests, normalization requests, selected profile, parser validation result, OOXML family, changed part count and errors. It does not intentionally log document contents.
+
+The local HTTP server binds to 127.0.0.1:8080 by default.

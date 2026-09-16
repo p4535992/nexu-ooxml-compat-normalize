@@ -1,22 +1,93 @@
 # Docker / Docker Compose
 
-The Docker deployment runs the **Java core through the Quarkus local service**. It is intended for a local Docker environment and does not require Java, Maven, Python or .NET on the host beyond Docker itself.
+The repository exposes **two independent Docker stacks** with the same web/REST contract:
 
-## Start
+- `docker-compose.java.yml` — Java core through Quarkus;
+- `docker-compose.python.yml` — Python normalization engine through the standard-library HTTP service, with the self-contained Microsoft Open XML SDK validator bundled in the image.
 
-From the repository root:
-
-```bash
-docker compose up --build -d
-```
-
-Then open:
+Both listen on host loopback port **8080 by default** and expose:
 
 ```text
 http://127.0.0.1:8080/
 ```
 
-The REST endpoints remain:
+Only one stack can own `127.0.0.1:8080` at a time. To run both simultaneously, keep one on 8080 and set `OOXML_PORT` for the other.
+
+## Java / Quarkus stack
+
+Start:
+
+```bash
+docker compose -f docker-compose.java.yml up --build -d
+```
+
+Open:
+
+```text
+http://127.0.0.1:8080/
+```
+
+Stop while preserving logs:
+
+```bash
+docker compose -f docker-compose.java.yml down
+```
+
+Delete the persistent log volume as well:
+
+```bash
+docker compose -f docker-compose.java.yml down -v
+```
+
+The Java container runs the Quarkus service and reuses the Java normalizer core; it does not invoke Python.
+
+## Python stack
+
+Start:
+
+```bash
+docker compose -f docker-compose.python.yml up --build -d
+```
+
+Open:
+
+```text
+http://127.0.0.1:8080/
+```
+
+Stop while preserving logs:
+
+```bash
+docker compose -f docker-compose.python.yml down
+```
+
+Delete the persistent log volume as well:
+
+```bash
+docker compose -f docker-compose.python.yml down -v
+```
+
+The Python image runs the same Python normalization engine used by the CLI/desktop application. The image also builds and bundles the self-contained Open XML SDK validator, and Docker configures SDK validation as `required`.
+
+## Run both at the same time
+
+For example, keep Java on port 8080 and run Python on port 8081:
+
+```bash
+docker compose -f docker-compose.java.yml up --build -d
+OOXML_PORT=8081 docker compose -f docker-compose.python.yml up --build -d
+```
+
+Then:
+
+```text
+Java:   http://127.0.0.1:8080/
+Python: http://127.0.0.1:8081/
+```
+
+## Shared REST API
+
+Both implementations expose the same paths:
 
 ```text
 GET  /api/info
@@ -24,73 +95,167 @@ POST /api/audit
 POST /api/normalize?profile=interop-transitional-v1
 ```
 
+Supported profiles:
+
+```text
+preserve-v1
+interop-transitional-v1
+portable-explicit-v1
+```
+
+For `POST /api/audit` and `POST /api/normalize`:
+
+- request body: raw DOCX/XLSX/PPTX bytes (`application/octet-stream`);
+- required header: `X-Filename` containing the original filename including extension;
+- `/api/audit` returns JSON;
+- `/api/normalize` returns the normalized OOXML file as `application/octet-stream` with `Content-Disposition`.
+
+### curl
+
+Audit:
+
+```bash
+curl -f \
+  -X POST \
+  -H "Content-Type: application/octet-stream" \
+  -H "X-Filename: document.docx" \
+  --data-binary @document.docx \
+  http://127.0.0.1:8080/api/audit
+```
+
+Normalize:
+
+```bash
+curl -f \
+  -X POST \
+  -H "Content-Type: application/octet-stream" \
+  -H "X-Filename: document.docx" \
+  --data-binary @document.docx \
+  "http://127.0.0.1:8080/api/normalize?profile=interop-transitional-v1" \
+  -o document-normalized.docx
+```
+
+### Python client code
+
+No third-party client library is required:
+
+```python
+from pathlib import Path
+from urllib.request import Request, urlopen
+
+src = Path("document.docx")
+request = Request(
+    "http://127.0.0.1:8080/api/normalize?profile=interop-transitional-v1",
+    data=src.read_bytes(),
+    method="POST",
+    headers={
+        "Content-Type": "application/octet-stream",
+        "X-Filename": src.name,
+    },
+)
+with urlopen(request) as response:
+    Path("document-normalized.docx").write_bytes(response.read())
+```
+
+The same client code can call either the Java or Python container because the HTTP contract is shared.
+
+### Java client code
+
+Java 11+ can use `java.net.http.HttpClient`:
+
+```java
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+Path input = Path.of("document.docx");
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("http://127.0.0.1:8080/api/normalize?profile=interop-transitional-v1"))
+    .header("Content-Type", "application/octet-stream")
+    .header("X-Filename", input.getFileName().toString())
+    .POST(HttpRequest.BodyPublishers.ofByteArray(Files.readAllBytes(input)))
+    .build();
+
+HttpResponse<byte[]> response = HttpClient.newHttpClient().send(
+    request,
+    HttpResponse.BodyHandlers.ofByteArray()
+);
+if (response.statusCode() != 200) {
+    throw new IllegalStateException("HTTP " + response.statusCode());
+}
+Files.write(Path.of("document-normalized.docx"), response.body());
+```
+
 ## Logs
 
-Quarkus writes its rotating file log to:
+The Java stack uses the named volume `ooxml-java-logs` and writes:
 
 ```text
 /data/logs/ooxml-compat-normalize-quarkus.log
 ```
 
-The `/data/logs` directory is backed by the Docker named volume `ooxml-logs`, so logs survive normal container recreation and `docker compose down`.
-
-Follow stdout/stderr with:
+Inspect it with:
 
 ```bash
-docker compose logs -f normalizer
+docker compose -f docker-compose.java.yml exec normalizer-java \
+  cat /data/logs/ooxml-compat-normalize-quarkus.log
 ```
 
-Inspect the persistent file inside the running container with:
+The Python stack uses the named volume `ooxml-python-logs` and writes:
+
+```text
+/data/logs/ooxml-compat-normalize-python.log
+```
+
+Inspect it with:
 
 ```bash
-docker compose exec normalizer cat /data/logs/ooxml-compat-normalize-quarkus.log
+docker compose -f docker-compose.python.yml exec normalizer-python \
+  cat /data/logs/ooxml-compat-normalize-python.log
 ```
 
-Copy it to the current host directory when needed:
+Normal `docker compose down` preserves each named volume. `down -v` deliberately deletes it.
+
+## Change host port or bind address
+
+Both compose files accept the same variables. To use another local port:
 
 ```bash
-docker compose cp normalizer:/data/logs/ooxml-compat-normalize-quarkus.log ./
+OOXML_PORT=18080 docker compose -f docker-compose.java.yml up --build -d
 ```
 
-## Stop
-
-Stop/remove containers and the Compose network while preserving the named log volume:
+or:
 
 ```bash
-docker compose down
+OOXML_PORT=18080 docker compose -f docker-compose.python.yml up --build -d
 ```
 
-To deliberately delete the persistent log volume too:
-
-```bash
-docker compose down -v
-```
-
-## Change host port
-
-The default host binding is deliberately loopback-only. To use another port while keeping the service local:
-
-```bash
-OOXML_PORT=18080 docker compose up --build -d
-```
-
-Then open `http://127.0.0.1:18080/`.
-
-To intentionally bind to another host interface, set `OOXML_BIND_ADDRESS` explicitly. For example, `OOXML_BIND_ADDRESS=0.0.0.0` exposes the mapped port on all host interfaces and should only be used when that network exposure is intended and protected appropriately.
+The default host binding is deliberately loopback-only. Set `OOXML_BIND_ADDRESS=0.0.0.0` only when intentional network exposure is required and properly protected.
 
 ## Container security model
 
-- the application process runs as numeric user `10001`, not root;
-- `no-new-privileges` is enabled by Compose;
-- browser auto-open is disabled in the container;
-- the host HTTP port is bound to `127.0.0.1` by default;
-- the persistent log directory uses a Docker named volume rather than a host bind mount, avoiding host ownership mismatches while keeping the process non-root;
-- uploaded OOXML files are processed through the existing Quarkus temporary-file flow and are not intentionally persisted in the log volume.
+Both stacks:
 
-## Build/runtime images and licensing
+- run the application process as numeric user `10001`, not root;
+- enable `no-new-privileges`;
+- bind the published host port to `127.0.0.1` by default;
+- persist only diagnostic logs in a named Docker volume;
+- process uploaded OOXML through temporary files and do not intentionally persist document contents in the log volume.
 
-The image is built locally with the Docker Official `maven` image using Eclipse Temurin 17 and runs on the Docker Official `eclipse-temurin:17-jre` image.
+The Java image preserves the Temurin/OpenJDK `legal/` material supplied by its base image. The Python image retains the project notices and copies the .NET SDK/runtime license and third-party notice used to build its self-contained Open XML SDK validator under `/app/licenses/dotnet/`.
 
-The project does not currently publish a prebuilt Docker image. `docker compose up --build` therefore pulls the upstream build/runtime images and builds this project's image locally.
+## CI coverage
 
-The final image includes this project's `LICENSE`, `THIRD_PARTY_NOTICES.md` and `THIRD_PARTY_LICENSES.md` under `/app/licenses`. The Eclipse Temurin/OpenJDK base image retains its own upstream runtime legal material under the JRE's `legal/` directory. See `docs/licensing.md` and `docs/licensing-audit.md` for the project-level licensing summary/checklist.
+`.github/workflows/docker-smoke.yml` builds and exercises **both** stacks. For each engine it verifies:
+
+- `/api/info`;
+- the web page `/`;
+- a real `POST /api/audit` using a generated DOCX fixture;
+- a real `POST /api/normalize` and ZIP integrity of the returned DOCX;
+- persistent file logging;
+- non-root execution;
+- license/legal material;
+- successful service restart while keeping the log volume.

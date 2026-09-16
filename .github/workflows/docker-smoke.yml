@@ -31,11 +31,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf docker-data
           export OOXML_PORT=18083
           docker compose up --build -d
 
-      - name: Verify API, UI, log persistence and non-root runtime
+      - name: Verify API, UI, persistent log, legal material and non-root runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -64,18 +63,39 @@ jobs:
           grep -q 'Normalizza e scarica' /tmp/ooxml-docker-home.html
           cat /tmp/ooxml-docker-info.json
 
+          # The named volume must be writable by the non-root application user
+          # and must contain the rotating Quarkus file log.
+          docker compose exec -T normalizer sh -c 'test -w /data/logs'
           for i in $(seq 1 20); do
-            [[ -s docker-data/logs/ooxml-compat-normalize-quarkus.log ]] && break
+            if docker compose exec -T normalizer sh -c 'test -s /data/logs/ooxml-compat-normalize-quarkus.log'; then
+              break
+            fi
             sleep 0.25
           done
-          test -s docker-data/logs/ooxml-compat-normalize-quarkus.log
-          grep -q 'OOXML Compat Normalize Quarkus local service started' docker-data/logs/ooxml-compat-normalize-quarkus.log
+          docker compose exec -T normalizer sh -c 'test -s /data/logs/ooxml-compat-normalize-quarkus.log'
+          docker compose exec -T normalizer grep -q 'OOXML Compat Normalize Quarkus local service started' /data/logs/ooxml-compat-normalize-quarkus.log
 
           uid="$(docker compose exec -T normalizer id -u)"
           test "$uid" != '0'
           docker compose exec -T normalizer test -r /app/licenses/LICENSE
           docker compose exec -T normalizer test -r /app/licenses/THIRD_PARTY_NOTICES.md
+          docker compose exec -T normalizer test -r /app/licenses/THIRD_PARTY_LICENSES.md
           docker compose exec -T normalizer sh -c 'test -d "$JAVA_HOME/legal"'
+
+          # A normal restart must keep the same named volume and the service must
+          # become healthy again without changing to a root user.
+          docker compose restart normalizer
+          restarted=false
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18083/api/info >/dev/null; then
+              restarted=true
+              break
+            fi
+            sleep 1
+          done
+          test "$restarted" = true
+          docker compose exec -T normalizer sh -c 'test -s /data/logs/ooxml-compat-normalize-quarkus.log'
+          test "$(docker compose exec -T normalizer id -u)" != '0'
 
           trap - EXIT
           cleanup

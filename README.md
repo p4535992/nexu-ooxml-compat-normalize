@@ -190,7 +190,7 @@ See [`java/README.md`](java/README.md).
 
 A small **Quarkus 3.39.3** application exposes the same Java core through a local web UI and REST API. It does not implement a separate normalization engine.
 
-By default it binds only to:
+By default it binds only to IPv4 loopback:
 
 ```text
 127.0.0.1:8080
@@ -214,6 +214,10 @@ Then open:
 http://127.0.0.1:8080/
 ```
 
+Use the explicit `127.0.0.1` address rather than `localhost`: on systems where `localhost` resolves to IPv6 `::1` first, `http://localhost:8080/` can fail while the IPv4-only local service is healthy.
+
+The packaged Windows `.exe` waits for the local service and automatically opens `http://127.0.0.1:8080/` in the default browser. A manual `open-ui.cmd` is also included.
+
 Available endpoints:
 
 - `GET /api/info`
@@ -222,15 +226,31 @@ Available endpoints:
 
 ### Diagnostic logging
 
-The Quarkus service writes a rotating diagnostic log. By default:
+Portable Quarkus distributions keep logs **inside the extracted application directory**, following the NexU portable pattern.
+
+Windows portable:
 
 ```text
-${user.home}/ooxml-compat-normalize-quarkus.log
+OOXML-Compat-Normalize-Quarkus/
+├─ OOXML-Compat-Normalize-Quarkus.exe
+├─ LOGS.txt
+└─ logs/
+   └─ ooxml-compat-normalize-quarkus.log
 ```
 
-The default rotation policy is 10 MB × 5 backups and rotate-on-start. Set `OOXML_LOG_FILE` to choose another path. Logs include startup, audit/normalization operations, selected profile, validation status and error information; the application does not intentionally log document contents.
+Linux portable uses the same `logs/` directory beside `ooxml-quarkus`.
 
-See [`quarkus/README.md`](quarkus/README.md) and `quarkus/jpackage/LOGS.txt`.
+For the raw JAR, the default is relative to the directory from which it is launched:
+
+```text
+./logs/ooxml-compat-normalize-quarkus.log
+```
+
+The rotation policy is 10 MB × 5 backups with rotate-on-start. Raw-JAR launches can override the file with `OOXML_LOG_FILE`. Logs include startup, audit/normalization operations, selected profile, validation status and error information; the application does not intentionally log document contents.
+
+The CI explicitly tests the real `/` HTML page and the portable log location; it no longer treats `/api/info` alone as sufficient UI validation.
+
+See [`quarkus/README.md`](quarkus/README.md) and [`quarkus/jpackage/LOGS.txt`](quarkus/jpackage/LOGS.txt).
 
 ## Java portable distribution and Windows EXE
 
@@ -261,7 +281,7 @@ The same build also creates a Windows per-user installer:
 OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe
 ```
 
-The installer adds the normal Windows launcher/shortcut while preserving the same localhost-only Quarkus behavior and file logging.
+The installer adds the normal Windows launcher/shortcut while preserving the same loopback-only Quarkus behavior and file logging.
 
 On Linux the portable contains:
 
@@ -272,6 +292,7 @@ OOXML-Compat-Normalize-java-quarkus.jar
 ooxml-normalize
 ooxml-quarkus
 LOGS.txt
+logs/
 ```
 
 No global Java installation is required for either portable package.
@@ -334,7 +355,7 @@ The project deliberately separates normalization from validation and delivery:
 - ZIP integrity and post-flight parsing are checked;
 - font substitution is disabled by default;
 - risky structures are preserved + reported instead of flattened;
-- Quarkus listens on localhost by default.
+- Quarkus listens only on the IPv4 loopback address by default.
 
 ## Development
 

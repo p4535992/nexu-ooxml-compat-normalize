@@ -31,6 +31,8 @@ Then open:
 http://127.0.0.1:8080/
 ```
 
+The service intentionally binds to IPv4 loopback. On machines where `localhost` resolves to IPv6 (`::1`) first, `http://localhost:8080/` can fail even though the service is running. Use the explicit `127.0.0.1` URL above.
+
 ## Windows EXE
 
 The Windows release also contains a jpackage-based Java portable and a per-user installer:
@@ -48,19 +50,35 @@ OOXML-Compat-Normalize-Quarkus.exe
 
 The package includes its Java runtime, so Java does not need to be installed globally. It also contains `ooxml-normalize.cmd` to run the Java core CLI using the same bundled runtime.
 
+The packaged Windows launcher opens `http://127.0.0.1:8080/` automatically after the local service reports ready. `open-ui.cmd` is also included as a manual shortcut.
+
 The packaging approach follows the same `jpackage` app-image + Windows EXE pattern used by the NexU project.
 
 ## Diagnostic logs
 
-File logging is enabled by default. The default path is:
+Portable packages keep their rotating diagnostic logs **inside the extracted application directory**, following the NexU portable pattern.
+
+Windows portable layout:
 
 ```text
-${user.home}/ooxml-compat-normalize-quarkus.log
+OOXML-Compat-Normalize-Quarkus/
+├─ OOXML-Compat-Normalize-Quarkus.exe
+├─ LOGS.txt
+└─ logs/
+   └─ ooxml-compat-normalize-quarkus.log
 ```
 
-The log rotates at 10 MB, keeps up to 5 backups, and rotates on startup. Override the file location with the `OOXML_LOG_FILE` environment variable.
+Linux portable layout uses the same `logs/` directory next to the launchers.
 
-The release CI does not merely check that the `.exe` exists: it launches the packaged Windows EXE, calls `/api/info`, and verifies that the diagnostic log contains the Quarkus startup marker.
+When running the raw JAR directly, the default is a relative path:
+
+```text
+./logs/ooxml-compat-normalize-quarkus.log
+```
+
+The log rotates at 10 MB, keeps up to 5 backups, and rotates on startup. The raw JAR path can be overridden with the `OOXML_LOG_FILE` environment variable.
+
+The release CI validates all of these points: it starts the packaged application, calls `/api/info`, fetches the actual `/` HTML page, verifies the text `Normalizza e scarica`, and checks that the startup marker is written to the portable `logs/` directory.
 
 See [`jpackage/LOGS.txt`](jpackage/LOGS.txt).
 

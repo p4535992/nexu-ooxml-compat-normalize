@@ -1,0 +1,26 @@
+name: Dispatch v0.4.0-rc.7
+
+on:
+  push:
+    paths:
+      - '.github/workflows/dispatch-rc7.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    if: "${{ github.event.head_commit.message == 'release: dispatch v0.4.0-rc.7' }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch full release workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run portable-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f release_tag=v0.4.0-rc.7 \
+            -f prerelease=true

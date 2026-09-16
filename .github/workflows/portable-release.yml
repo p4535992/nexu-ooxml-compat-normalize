@@ -475,17 +475,49 @@ jobs:
                 ;;
               OOXML-Compat-Normalize-java-portable-linux-x64)
                 chmod +x "$dir/ooxml-normalize" "$dir/ooxml-quarkus" || true
-                (cd "$dir" && tar -czf "../OOXML-Compat-Normalize-java-portable-linux-x64.tar.gz" .)
+                tar -czf "OOXML-Compat-Normalize-java-portable-linux-x64.tar.gz" "$dir"
                 ;;
               OOXML-Compat-Normalize-python-portable-win-x64)
-                (cd "$dir" && zip -9 -r "../OOXML-Compat-Normalize-python-portable-win-x64.zip" .)
+                zip -9 -r "OOXML-Compat-Normalize-python-portable-win-x64.zip" "$dir"
                 ;;
               OOXML-Compat-Normalize-python-portable-linux-x64)
                 chmod +x "$dir/OOXML-Compat-Normalize" || true
-                (cd "$dir" && tar -czf "../OOXML-Compat-Normalize-python-portable-linux-x64.tar.gz" .)
+                tar -czf "OOXML-Compat-Normalize-python-portable-linux-x64.tar.gz" "$dir"
                 ;;
             esac
           done
+
+          python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          archives = sorted(Path('.').glob('OOXML-Compat-Normalize-*.zip')) + sorted(Path('.').glob('OOXML-Compat-Normalize-*.tar.gz'))
+          if not archives:
+              raise SystemExit('No portable archives were created')
+
+          for archive in archives:
+              if archive.name.endswith('.tar.gz'):
+                  expected = archive.name[:-7]
+                  with tarfile.open(archive, 'r:gz') as tf:
+                      names = [m.name for m in tf.getmembers()]
+              else:
+                  expected = archive.stem
+                  with zipfile.ZipFile(archive) as zf:
+                      names = zf.namelist()
+
+              roots = set()
+              for raw in names:
+                  name = raw.replace('\\', '/').lstrip('./')
+                  if not name:
+                      continue
+                  roots.add(name.split('/', 1)[0])
+
+              if roots != {expected}:
+                  raise SystemExit(f'{archive.name}: expected only top-level {expected!r}, found {sorted(roots)!r}')
+              print(f'{archive.name}: top-level folder OK -> {expected}/')
+          PY
+
           sha256sum *.zip *.tar.gz *.jar *.exe > SHA256SUMS.txt
 
       - name: Create GitHub Release and tag

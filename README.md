@@ -128,126 +128,154 @@ The default behavior is **preserve font identity and semantics**:
 
 The non-default modes are **environment/user policy**, not part of the canonical representation.
 
-A font inventory answers a separate question: “does this specific machine have every font required by this document?”. It does not silently redefine normalized OOXML.
-
 ## Python CLI
-
-Audit:
 
 ```bash
 ooxml-compat-normalize input.docx --audit-only --report preflight.json
-```
 
-Recommended normalization:
-
-```bash
 ooxml-compat-normalize input.docx output.docx \
   --profile interop-transitional-v1 \
   --report output.report.json
-```
-
-More explicit profile:
-
-```bash
-ooxml-compat-normalize input.pptx output.pptx \
-  --profile portable-explicit-v1
-```
-
-Explicit mapping remains opt-in:
-
-```bash
-ooxml-compat-normalize input.xlsx output.xlsx \
-  --font-policy map \
-  --font-map 'Arial=Liberation Sans'
 ```
 
 ## Portable desktop application
 
 The Tkinter GUI supports selecting one or more `.docx`, `.xlsx` or `.pptx` files, choosing the normalization profile and font policy, and writing JSON reports.
 
-Windows/Linux portable builds embed a self-contained **.NET / Microsoft Open XML SDK** validator in the same application. End users do not need Python or .NET installed.
+Windows/Linux desktop portable builds embed a self-contained **.NET / Microsoft Open XML SDK** validator. End users do not need Python or .NET installed.
 
 ```text
-DOCX -> DOCX
-XLSX -> XLSX
-PPTX -> PPTX
-```
-
-Local builds:
-
-```powershell
-# Windows x64
-.\portable\build_windows_portable.ps1
-```
-
-```bash
-# Linux x64
-./portable/build_linux_portable.sh
+DOCX → DOCX
+XLSX → XLSX
+PPTX → PPTX
 ```
 
 See [`portable/README.md`](portable/README.md).
 
-## Standalone Java JAR
+## Java core
 
-For JVM environments the project also contains an **independent Java normalizer**, not a wrapper around the Python executable.
+The Java implementation is a real library/CLI, not a wrapper around Python.
 
-Build:
-
-```bash
-mvn -f java/pom.xml clean verify package
-```
-
-Run:
-
-```bash
-java -jar java/target/ooxml-compat-normalize-java.jar input.docx output.docx
-```
-
-Audit:
-
-```bash
-java -jar java/target/ooxml-compat-normalize-java.jar input.xlsx --audit-only
-```
-
-The Java implementation uses:
+It uses:
 
 - **Apache POI 5.5.1** as a cross-format OPC/OOXML parser;
 - **docx4j 17.1.0** as a second independent OOXML parser/model;
 - JDK ZIP/XML primitives for the actual package-preserving writer.
 
-POI/docx4j are deliberately used for **pre-flight and post-flight parsing/validation**, not to open and re-save the complete document. This keeps the same project rule: unknown/vendor package parts should remain untouched unless a normalization rule explicitly owns them.
+POI/docx4j are used for **pre-flight and post-flight parsing/validation**, not to re-save the complete document.
 
-The JAR currently implements the conservative package/font/semantic-color layer. Advanced `portable-explicit-v1` theme/default materialization is being ported incrementally; the Java CLI reports the partial parity rather than claiming transformations it does not yet implement.
+The Maven module produces two artifacts during development:
+
+- a normal thin library JAR used by other Java modules;
+- an executable shaded `-all.jar` used to create the release artifact `ooxml-compat-normalize-java.jar`.
+
+Build locally:
+
+```bash
+mvn -f java/pom.xml clean install
+```
+
+Release-style CLI usage:
+
+```bash
+java -jar ooxml-compat-normalize-java.jar input.docx output.docx
+java -jar ooxml-compat-normalize-java.jar input.xlsx --audit-only
+```
 
 See [`java/README.md`](java/README.md).
 
-## Release artifacts
+## Quarkus local service
 
-A release can contain all three runnable distributions:
+A very small **Quarkus 3.39.3** application exposes the same Java core through a local web UI and REST API. It does not implement a separate normalization engine.
+
+By default it binds only to:
 
 ```text
+127.0.0.1:8080
+```
+
+Run the release JAR:
+
+```bash
+java -jar ooxml-compat-normalize-quarkus.jar
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8080/
+```
+
+Available endpoints:
+
+- `GET /api/info`
+- `POST /api/audit`
+- `POST /api/normalize?profile=interop-transitional-v1`
+
+The Quarkus artifact is built as a single executable **uber-JAR**. See [`quarkus/README.md`](quarkus/README.md).
+
+## Portable Java distribution
+
+For machines where Java is not installed, releases also contain Java portable packages for Windows and Linux. Each package bundles a Java 17 runtime created with `jlink` plus **both** Java applications:
+
+```text
+runtime/
+ooxml-compat-normalize-java.jar
+ooxml-compat-normalize-quarkus.jar
+```
+
+Windows launchers:
+
+```text
+ooxml-normalize.cmd
+ooxml-quarkus.cmd
+```
+
+Linux launchers:
+
+```text
+ooxml-normalize
+ooxml-quarkus
+```
+
+So the same portable package can be used either as a CLI normalizer or as the local Quarkus web service, without installing Java globally.
+
+## Release artifacts
+
+A full release is expected to contain:
+
+```text
+# Desktop Python/.NET portable
 OOXML-Compat-Normalize-win-x64.zip
 OOXML-Compat-Normalize-linux-x64.tar.gz
+
+# Raw Java artifacts
 ooxml-compat-normalize-java.jar
+ooxml-compat-normalize-quarkus.jar
+
+# Java runtime bundled portables
+OOXML-Compat-Normalize-java-portable-win-x64.zip
+OOXML-Compat-Normalize-java-portable-linux-x64.tar.gz
+
 SHA256SUMS.txt
 ```
 
-The Windows/Linux binaries are desktop applications. The JAR is intended for Java/JVM workflows and requires a compatible Java runtime (Java 17+ for the project build target).
+All artifacts in a release are built from the same commit by GitHub Actions.
 
 ## Tooling
 
-The project deliberately separates normalization from validation:
+The project deliberately separates normalization from validation and delivery:
 
-- **Python standard library** — main package-preserving normalization/audit engine;
-- **Microsoft Open XML SDK** — independent structural validation embedded in portable desktop builds;
+- **Python standard library** — primary package-preserving normalization/audit engine;
+- **Microsoft Open XML SDK** — independent structural validation embedded in desktop portable builds;
 - **.NET self-contained publish** — bundles that validator without requiring a .NET installation;
 - **Tkinter + PyInstaller** — desktop GUI and one-file Windows/Linux distributions;
 - **Apache POI 5.5.1** — Java cross-format OPC/OOXML parser;
 - **docx4j 17.1.0** — independent Java OOXML parser/model;
-- **Maven + Maven Shade Plugin** — tested standalone Java fat JAR;
-- **GitHub Actions / GitHub CLI** — reproducible Windows/Linux/JAR builds, checksums and release publication.
-
-OpenXmlPowerTools remains a useful regression/research tool but is not a runtime dependency.
+- **Quarkus 3.39.3 / Quarkus REST Jackson** — local Java web/API wrapper around the Java core;
+- **Maven + Maven Shade Plugin** — Java library, executable core JAR and Quarkus build;
+- **Eclipse Temurin/OpenJDK 17 + jlink** — bundled Java runtime for Windows/Linux Java portable distributions;
+- **GitHub Actions / GitHub CLI** — reproducible builds, checksums and release publication.
 
 ## Safety properties
 
@@ -259,8 +287,8 @@ OpenXmlPowerTools remains a useful regression/research tool but is not a runtime
 - relationship/content-type changes are not made implicitly;
 - ZIP integrity and post-flight parsing are checked;
 - font substitution is disabled by default;
-- theme materialization only occurs when unambiguous;
-- risky structures are preserved + reported instead of flattened.
+- risky structures are preserved + reported instead of flattened;
+- Quarkus listens on localhost by default.
 
 ## Development
 
@@ -271,11 +299,17 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-Java:
+Java core:
 
 ```bash
-mvn -f java/pom.xml clean verify package
-java -jar java/target/ooxml-compat-normalize-java.jar --help
+mvn -f java/pom.xml clean install
+```
+
+Quarkus:
+
+```bash
+mvn -f java/pom.xml install
+mvn -f quarkus/pom.xml clean verify package
 ```
 
 ## Roadmap
@@ -293,20 +327,14 @@ java -jar java/target/ooxml-compat-normalize-java.jar --help
 
 The project source code is **MIT licensed**. Runtime/build dependencies are free/open source.
 
-Desktop portable builds use:
+Desktop portable builds use Microsoft Open XML SDK (MIT), .NET, Python, Tcl/Tk and PyInstaller under their respective licenses.
 
-- **Microsoft Open XML SDK** — MIT;
-- **.NET runtime** — MIT plus applicable third-party notices;
-- **Python** — Python Software Foundation License;
-- **Tcl/Tk** — permissive Tcl/Tk terms;
-- **PyInstaller** — GPLv2 with the PyInstaller bootloader exception for bundled applications.
+The Java core uses **Apache POI 5.5.1** and **docx4j 17.1.0**, both Apache License 2.0, plus their Maven-resolved transitive open-source dependencies.
 
-The Java JAR uses:
+The Quarkus local service uses **Quarkus 3.39.3**, licensed under Apache License 2.0, plus compatible open-source dependencies.
 
-- **Apache POI 5.5.1** — Apache License 2.0;
-- **docx4j 17.1.0** — Apache License 2.0;
-- their Maven-resolved transitive open-source dependencies under their respective terms.
+Java portable distributions bundle a `jlink` runtime derived from **Eclipse Temurin/OpenJDK 17**. OpenJDK is distributed under **GPL-2.0 with the Classpath Exception**, plus the applicable third-party notices. This does not change the MIT license of this project's source code, but the runtime's license/notices travel with the portable distribution.
 
-LibreOffice, ONLYOFFICE and Microsoft Office are interoperability peers only: their binaries are not linked, invoked or redistributed. Font binaries are not bundled; optional mappings only change OOXML family declarations when explicitly requested.
+LibreOffice, ONLYOFFICE and Microsoft Office are interoperability peers only: their binaries are not linked, invoked or redistributed. Font binaries are not bundled.
 
 See [`LICENSE`](LICENSE), [`docs/licensing.md`](docs/licensing.md), [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).

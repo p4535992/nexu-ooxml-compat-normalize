@@ -30,6 +30,7 @@ portable = ["pyinstaller>=6.10"]
 [project.scripts]
 ooxml-compat-normalize = "ooxml_compat_normalize.cli:main"
 ooxml-compat-normalize-gui = "ooxml_compat_normalize.gui:main"
+ooxml-compat-normalize-web = "ooxml_compat_normalize.web_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

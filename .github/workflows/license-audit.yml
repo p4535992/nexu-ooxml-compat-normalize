@@ -1,0 +1,123 @@
+name: Java SBOM and license audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'java/**'
+      - 'quarkus/**'
+      - 'THIRD_PARTY_NOTICES.md'
+      - 'THIRD_PARTY_LICENSES.md'
+      - 'docs/licensing.md'
+      - 'docs/licensing-audit.md'
+      - '.github/workflows/license-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: |
+            java/pom.xml
+            quarkus/pom.xml
+
+      - name: Build/install Java core and Quarkus
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -f java/pom.xml clean install -DskipTests
+          mvn -B -ntp -f quarkus/pom.xml clean package -DskipTests
+
+      - name: Generate CycloneDX SBOMs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -f java/pom.xml \
+            org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeBom \
+            -DoutputFormat=json \
+            -DoutputName=ooxml-core-sbom \
+            -Dcyclonedx.skipAttach=true
+          mvn -B -ntp -f quarkus/pom.xml \
+            org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeBom \
+            -DoutputFormat=json \
+            -DoutputName=ooxml-quarkus-sbom \
+            -Dcyclonedx.skipAttach=true
+
+      - name: Generate dependency trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -f java/pom.xml dependency:tree -DoutputFile=target/dependency-tree.txt
+          mvn -B -ntp -f quarkus/pom.xml dependency:tree -DoutputFile=target/dependency-tree.txt
+
+      - name: Summarize SBOM license metadata
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          paths = [
+              Path('java/target/ooxml-core-sbom.json'),
+              Path('quarkus/target/ooxml-quarkus-sbom.json'),
+          ]
+          for path in paths:
+              data = json.loads(path.read_text(encoding='utf-8'))
+              components = data.get('components', [])
+              missing = []
+              licenses = Counter()
+              for component in components:
+                  refs = []
+                  for item in component.get('licenses') or []:
+                      if 'expression' in item:
+                          refs.append(item['expression'])
+                      license_obj = item.get('license') or {}
+                      value = license_obj.get('id') or license_obj.get('name')
+                      if value:
+                          refs.append(value)
+                  if not refs:
+                      missing.append(f"{component.get('group','')}:{component.get('name','')}:{component.get('version','')}")
+                  else:
+                      for value in refs:
+                          licenses[value] += 1
+              print(f'\n{path}: {len(components)} components')
+              for name, count in licenses.most_common():
+                  print(f'  {count:3}  {name}')
+              if missing:
+                  print(f'  WARNING: {len(missing)} component(s) have no license metadata in the generated SBOM:')
+                  for component in missing:
+                      print(f'    - {component}')
+                  print('::warning::Some Java dependencies have no license metadata in Maven/CycloneDX; review them manually before a stable release.')
+          PY
+
+      - name: Prepare audit artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p license-audit
+          cp java/target/ooxml-core-sbom.json license-audit/OOXML-Compat-Normalize-java-core-sbom.json
+          cp quarkus/target/ooxml-quarkus-sbom.json license-audit/OOXML-Compat-Normalize-java-quarkus-sbom.json
+          cp java/target/dependency-tree.txt license-audit/OOXML-Compat-Normalize-java-core-dependencies.txt
+          cp quarkus/target/dependency-tree.txt license-audit/OOXML-Compat-Normalize-java-quarkus-dependencies.txt
+          cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md license-audit/
+
+      - name: Upload license audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OOXML-Compat-Normalize-license-audit
+          path: license-audit/
+          if-no-files-found: error

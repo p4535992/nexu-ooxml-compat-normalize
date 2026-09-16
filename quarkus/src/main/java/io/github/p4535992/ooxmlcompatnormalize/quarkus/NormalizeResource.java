@@ -13,6 +13,7 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,6 +23,8 @@ import java.util.Set;
 
 @Path("/api")
 public class NormalizeResource {
+
+    private static final Logger LOG = Logger.getLogger(NormalizeResource.class);
 
     private static final Set<String> PROFILES = Set.of(
             "preserve-v1",
@@ -47,11 +50,20 @@ public class NormalizeResource {
     @Produces(MediaType.APPLICATION_JSON)
     public AuditResponse audit(byte[] body, @HeaderParam("X-Filename") String filename) throws IOException {
         String safeName = validateFilename(filename);
+        LOG.infof("Audit requested: file=%s bytes=%d", safeName, body == null ? 0 : body.length);
         java.nio.file.Path input = writeTemp(body, safeName);
         try {
             Set<String> parts = Normalizer.packageNames(input);
             Normalizer.Kind kind = Normalizer.detectKind(parts);
             LibraryValidation.Result validation = LibraryValidation.validate(input);
+            LOG.infof(
+                    "Audit completed: file=%s kind=%s parts=%d poi=%s docx4j=%s",
+                    safeName,
+                    kind,
+                    parts.size(),
+                    validation.poiValid(),
+                    validation.docx4jValid()
+            );
             return new AuditResponse(
                     safeName,
                     kind.name(),
@@ -83,12 +95,20 @@ public class NormalizeResource {
             throw new WebApplicationException("Unsupported profile: " + profile, Response.Status.BAD_REQUEST);
         }
 
+        LOG.infof(
+                "Normalization requested: file=%s bytes=%d profile=%s",
+                safeName,
+                body == null ? 0 : body.length,
+                profile
+        );
+
         java.nio.file.Path input = writeTemp(body, safeName);
         String suffix = extensionOf(safeName);
         java.nio.file.Path output = Files.createTempFile("ooxml-normalized-", suffix);
         try {
             LibraryValidation.Result pre = LibraryValidation.validate(input);
             if (!pre.valid()) {
+                LOG.warnf("Pre-flight rejected file=%s poi=%s docx4j=%s", safeName, pre.poiValid(), pre.docx4jValid());
                 throw new WebApplicationException(
                         "Input cannot be parsed by both Apache POI and docx4j",
                         422
@@ -103,6 +123,7 @@ public class NormalizeResource {
 
             LibraryValidation.Result post = LibraryValidation.validate(output);
             if (!post.valid()) {
+                LOG.errorf("Post-flight failed file=%s poi=%s docx4j=%s", safeName, post.poiValid(), post.docx4jValid());
                 throw new WebApplicationException(
                         "Normalized output failed Java post-flight validation",
                         Response.Status.INTERNAL_SERVER_ERROR
@@ -111,6 +132,13 @@ public class NormalizeResource {
 
             byte[] normalized = Files.readAllBytes(output);
             String outputName = stemOf(safeName) + "-normalized" + suffix;
+            LOG.infof(
+                    "Normalization completed: file=%s kind=%s changedParts=%d outputBytes=%d",
+                    safeName,
+                    result.kind(),
+                    result.changedParts().size(),
+                    normalized.length
+            );
             return Response.ok(normalized, MediaType.APPLICATION_OCTET_STREAM_TYPE)
                     .header("Content-Disposition", "attachment; filename=\"" + outputName + "\"")
                     .header("X-OOXML-Kind", result.kind().name())

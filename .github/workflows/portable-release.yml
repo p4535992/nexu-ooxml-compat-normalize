@@ -13,6 +13,11 @@ on:
         default: false
         type: boolean
   push:
+    branches:
+      - main
+    paths:
+      - 'java/**'
+      - '.github/workflows/portable-release.yml'
     tags:
       - 'v*'
 
@@ -154,14 +159,56 @@ jobs:
           path: payload/
           if-no-files-found: error
 
-  release:
-    name: Publish GitHub Release
-    if: needs.release_config.outputs.publish == 'true'
-    needs: [release_config, build]
+  java:
+    name: Build standalone Java JAR
+    needs: release_config
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download all portable artifacts
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: java/pom.xml
+
+      - name: Build and test Java normalizer
+        shell: bash
+        run: mvn -B -ntp -f java/pom.xml clean verify package
+
+      - name: Smoke-test shaded JAR
+        shell: bash
+        run: java -jar java/target/ooxml-compat-normalize-java.jar --help
+
+      - name: Prepare Java payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p java-payload
+          cp java/target/ooxml-compat-normalize-java.jar java-payload/
+          cp java/README.md java-payload/JAVA-README.md
+          cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md java-payload/
+          sha256sum java-payload/ooxml-compat-normalize-java.jar > java-payload/SHA256SUMS-java.txt
+
+      - name: Upload Java artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OOXML-Compat-Normalize-java
+          path: java-payload/
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: needs.release_config.outputs.publish == 'true'
+    needs: [release_config, build, java]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: release
@@ -173,14 +220,16 @@ jobs:
           cd release
           for dir in OOXML-Compat-Normalize-*; do
             [ -d "$dir" ] || continue
-            if [[ "$dir" == *win-* ]]; then
+            if [[ "$dir" == "OOXML-Compat-Normalize-java" ]]; then
+              cp "$dir/ooxml-compat-normalize-java.jar" ./ooxml-compat-normalize-java.jar
+            elif [[ "$dir" == *win-* ]]; then
               (cd "$dir" && zip -9 -r "../${dir}.zip" .)
-            else
+            elif [[ "$dir" == *linux-* ]]; then
               chmod +x "$dir"/OOXML-Compat-Normalize || true
               (cd "$dir" && tar -czf "../${dir}.tar.gz" .)
             fi
           done
-          sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+          sha256sum *.zip *.tar.gz *.jar > SHA256SUMS.txt
 
       - name: Create GitHub Release and tag
         shell: bash
@@ -197,6 +246,7 @@ jobs:
           gh release create "$TAG" \
             release/*.zip \
             release/*.tar.gz \
+            release/*.jar \
             release/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \

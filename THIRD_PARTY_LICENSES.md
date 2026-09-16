@@ -20,7 +20,7 @@ License: MIT for the .NET runtime project, together with third-party notices app
 
 ## Python
 
-License: Python Software Foundation License. Portable builds include a CPython runtime through the bundler.
+License: Python Software Foundation License. Desktop portable builds include a CPython runtime through the bundler.
 
 ## Tcl/Tk
 
@@ -42,8 +42,26 @@ Upstream: https://poi.apache.org/
 
 License: Apache License, Version 2.0.
 
-Purpose in this project: second independent Java OOXML package/model parser used by the standalone JAR for pre-flight/post-flight validation.
+Purpose in this project: second independent Java OOXML package/model parser used by the Java core for pre-flight/post-flight validation.
 
 Upstream: https://www.docx4java.org/
 
-The shaded Java JAR also contains Maven-resolved transitive dependencies under their own open-source terms. Upstream `META-INF` license/notice resources and the Java module `THIRD-PARTY-NOTICES.txt` resource are part of the distribution inputs.
+## Quarkus 3.39.3
+
+License: Apache License, Version 2.0 for the Quarkus project. Quarkus runtime extensions and their transitive dependencies are distributed under Apache-2.0 or other compatible open-source licenses according to their upstream metadata.
+
+Purpose in this project: local-only web UI and REST service wrapping the Java core normalizer.
+
+Upstream: https://quarkus.io/
+
+## Eclipse Temurin / OpenJDK 17
+
+License: GPL-2.0 with the Classpath Exception, plus third-party notices applicable to the exact Temurin/OpenJDK build.
+
+Purpose in this project: platform-specific runtime image created with `jlink` and bundled inside the Windows/Linux Java portable archives.
+
+The Classpath Exception permits linking applications with the Java class libraries without imposing the GPL on the application code itself. The authoritative OpenJDK/Temurin license text and runtime third-party notices must be retained with redistributed runtime images.
+
+## Java shaded/uber artifacts
+
+The executable Java core JAR and Quarkus uber-JAR contain Maven-resolved transitive dependencies under their own open-source terms. Upstream `META-INF` license/notice resources are retained where supplied. The Java portable distributions additionally contain a `jlink` runtime and the project's `LICENSE`, `THIRD_PARTY_NOTICES.md` and `THIRD_PARTY_LICENSES.md` files.

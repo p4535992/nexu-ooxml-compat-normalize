@@ -1,65 +1,16 @@
-name: Bootstrap v0.4.0-rc.1 and portable release
+name: Portable test release v0.4.0-rc.1
 
 on:
   push:
     paths:
-      - '.release-bootstrap/READY'
+      - '.github/workflows/portable-release.yml'
 
 permissions:
   contents: write
 
 jobs:
-  sync:
-    name: Sync renamed v0.4 source to main
-    if: "${{ github.event.head_commit.message != 'release-bootstrap-sync' }}"
-    runs-on: ubuntu-latest
-    outputs:
-      sha: ${{ steps.commit.outputs.sha }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Decode source bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/ooxml-source
-          cat .release-bootstrap/source.zip.b64.part* | base64 -d > /tmp/ooxml-source.zip
-          unzip -t /tmp/ooxml-source.zip
-          unzip -q /tmp/ooxml-source.zip -d /tmp/ooxml-source
-
-      - name: Synchronize repository contents
-        shell: bash
-        run: |
-          set -euo pipefail
-          rsync -a --delete --exclude '.git/' /tmp/ooxml-source/ ./
-          test -f pyproject.toml
-          test -f src/ooxml_compat_normalize/normalizer.py
-          test ! -e src/docx_compat_normalizer
-          ! grep -RIn --exclude-dir='.git' --exclude='*.pyc' -E 'docx[-_ ]compat[-_ ]normalizer|docx_compat_normalizer|docx-compat-normalizer|docx-compat-normalize' .
-
-      - name: Run source tests before commit
-        shell: bash
-        run: PYTHONPATH=src python -m unittest discover -s tests -v
-
-      - id: commit
-        name: Commit synchronized source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git reset -- .github/workflows/portable-release.yml
-          git commit -m 'release-bootstrap-sync'
-          git push origin HEAD:main
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
   build:
     name: Build ${{ matrix.rid }}
-    needs: sync
     strategy:
       fail-fast: false
       matrix:
@@ -73,11 +24,10 @@ jobs:
             artifact: OOXML-Compat-Normalize-linux-x64
             validator: dotnet/OpenXmlSdkValidator/bin/Release/net8.0/linux-x64/publish/OpenXmlSdkValidator
     runs-on: ${{ matrix.os }}
+
     steps:
-      - name: Checkout synchronized source
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.sync.outputs.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -96,7 +46,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y tk-dev tcl-dev
 
-      - name: Run tests
+      - name: Run Python tests
         shell: bash
         run: PYTHONPATH=src python -m unittest discover -s tests -v
 
@@ -104,7 +54,7 @@ jobs:
         shell: bash
         run: python -c "import tkinter; print('Tk', tkinter.TkVersion)"
 
-      - name: Publish Open XML SDK validator
+      - name: Publish self-contained Open XML SDK validator
         shell: bash
         run: >-
           dotnet publish dotnet/OpenXmlSdkValidator/OpenXmlSdkValidator.csproj
@@ -126,7 +76,7 @@ jobs:
           OPENXML_VALIDATOR_BIN: ${{ matrix.validator }}
         run: pyinstaller --clean --noconfirm portable/OOXMLCompatNormalize.spec
 
-      - name: Prepare payload
+      - name: Prepare artifact payload
         shell: bash
         run: |
           set -euo pipefail
@@ -144,7 +94,7 @@ jobs:
           (base / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
 
-      - name: Upload artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -152,11 +102,12 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Publish v0.4.0-rc.1 pre-release
-    needs: [sync, build]
+    name: Create v0.4.0-rc.1 pre-release
+    needs: build
     runs-on: ubuntu-latest
+
     steps:
-      - name: Download artifacts
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: release
@@ -172,7 +123,7 @@ jobs:
               (cd "$dir" && zip -9 -r "../${dir}.zip" .)
             else
               chmod +x "$dir"/OOXML-Compat-Normalize || true
-              tar -C "$dir" -czf "${dir}.tar.gz" .
+              (cd "$dir" && tar -czf "../${dir}.tar.gz" .)
             fi
           done
           sha256sum *.zip *.tar.gz > SHA256SUMS.txt
@@ -181,7 +132,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ needs.sync.outputs.sha }}
         run: |
           set -euo pipefail
           gh release create 'v0.4.0-rc.1' \
@@ -189,7 +139,7 @@ jobs:
             release/*.tar.gz \
             release/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$TARGET_SHA" \
+            --target "$GITHUB_SHA" \
             --title 'v0.4.0-rc.1' \
             --prerelease \
-            --notes 'Test release for the renamed ooxml-compat-normalize project. Includes Windows x64 and Linux x64 portable builds with the self-contained Open XML SDK validator.'
+            --notes 'Test release of ooxml-compat-normalize. Includes Windows x64 and Linux x64 portable builds. Each portable embeds the self-contained Microsoft Open XML SDK validator used by the pre-flight/post-flight validation bridge.'

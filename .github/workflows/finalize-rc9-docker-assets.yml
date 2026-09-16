@@ -1,0 +1,73 @@
+name: Finalize v0.4.0-rc.9 Docker assets
+
+on:
+  push:
+    paths:
+      - '.github/workflows/finalize-rc9-docker-assets.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: "${{ github.event.head_commit.message == 'release: finalize v0.4.0-rc.9 docker checksums' }}"
+    runs-on: ubuntu-24.04
+    env:
+      TAG: v0.4.0-rc.9
+      JAVA_ZIP: OOXML-Compat-Normalize-java-docker-compose.zip
+      PYTHON_ZIP: OOXML-Compat-Normalize-python-docker-compose.zip
+
+    steps:
+      - name: Download published checksum and Docker assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS.txt --dir assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$JAVA_ZIP" --dir assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$PYTHON_ZIP" --dir assets
+
+      - name: Add Docker bundle digests to SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import os
+
+          base = Path('assets')
+          checksum = base / 'SHA256SUMS.txt'
+          docker_names = {os.environ['JAVA_ZIP'], os.environ['PYTHON_ZIP']}
+          lines = []
+          for line in checksum.read_text(encoding='utf-8').splitlines():
+              if not any(name in line for name in docker_names):
+                  lines.append(line)
+          for name in (os.environ['JAVA_ZIP'], os.environ['PYTHON_ZIP']):
+              path = base / name
+              lines.append(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {name}')
+          checksum.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+          cat assets/SHA256SUMS.txt
+
+      - name: Replace checksum asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" assets/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Verify final release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          printf '%s\n' "$assets"
+          grep -Fxq "$JAVA_ZIP" <<<"$assets"
+          grep -Fxq "$PYTHON_ZIP" <<<"$assets"
+          grep -Fxq 'SHA256SUMS.txt' <<<"$assets"

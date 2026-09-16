@@ -3,7 +3,7 @@ name: Bootstrap v0.4.0-rc.1 and portable release
 on:
   push:
     paths:
-      - '.release-bootstrap/source.zip.b64'
+      - '.release-bootstrap/READY'
 
 permissions:
   contents: write
@@ -25,7 +25,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/ooxml-source
-          base64 -d .release-bootstrap/source.zip.b64 > /tmp/ooxml-source.zip
+          cat .release-bootstrap/source.zip.b64.part* | base64 -d > /tmp/ooxml-source.zip
+          unzip -t /tmp/ooxml-source.zip
           unzip -q /tmp/ooxml-source.zip -d /tmp/ooxml-source
 
       - name: Synchronize repository contents

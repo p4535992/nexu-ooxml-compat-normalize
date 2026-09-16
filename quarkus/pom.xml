@@ -6,7 +6,7 @@
 
   <groupId>io.github.p4535992</groupId>
   <artifactId>ooxml-compat-normalize-quarkus</artifactId>
-  <version>0.4.0-rc.8</version>
+  <version>0.4.0-rc.9</version>
   <name>ooxml-compat-normalize Quarkus local service</name>
   <description>Small local Quarkus service and web UI for the OOXML normalizer.</description>
 
@@ -35,7 +35,7 @@
     <dependency>
       <groupId>io.github.p4535992</groupId>
       <artifactId>ooxml-compat-normalize-java</artifactId>
-      <version>0.4.0-rc.8</version>
+      <version>0.4.0-rc.9</version>
       <!-- docx4j brings jcl-over-slf4j for standalone use. Quarkus already
            provides its own Commons Logging -> JBoss Logging bridge, so keeping
            both would put duplicate org.apache.commons.logging classes in the

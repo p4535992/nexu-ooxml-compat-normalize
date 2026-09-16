@@ -113,7 +113,7 @@ public final class Main {
     private static void printAudit(Path input, boolean requireJavaParsers) throws IOException {
         Set<String> parts = Normalizer.packageNames(input);
         Normalizer.Kind kind = Normalizer.detectKind(parts);
-        Set<String> fonts = Normalizer.inventoryFonts(input);
+        Set<String> fonts = FontInventory.scan(input);
         LibraryValidation.Result libraries = LibraryValidation.validate(input);
 
         System.out.println("file=" + input);

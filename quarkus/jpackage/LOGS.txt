@@ -1,17 +1,36 @@
 OOXML Compat Normalize - Quarkus diagnostic logs
 =================================================
 
-The Quarkus local service writes a rotating diagnostic log by default to:
+Portable packages keep logs beside the application, following the same pattern used by NexU.
 
-  ${user.home}/ooxml-compat-normalize-quarkus.log
+Windows portable ZIP
+--------------------
 
-Examples:
+After extracting the ZIP, the application image contains:
 
-  Windows:
-    C:\Users\<user>\ooxml-compat-normalize-quarkus.log
+  OOXML-Compat-Normalize-Quarkus.exe
+  logs\
+    ooxml-compat-normalize-quarkus.log
 
-  Linux:
-    /home/<user>/ooxml-compat-normalize-quarkus.log
+The jpackage launcher passes an application-relative log path, so the log stays in the extracted portable directory instead of the user profile.
+
+Linux portable
+--------------
+
+The launcher writes to:
+
+  ./logs/ooxml-compat-normalize-quarkus.log
+
+relative to the extracted portable directory.
+
+Raw JAR
+-------
+
+When running the raw Quarkus JAR directly, the default is also a relative path:
+
+  ./logs/ooxml-compat-normalize-quarkus.log
+
+You can still override it with OOXML_LOG_FILE.
 
 Rotation policy
 ---------------
@@ -23,12 +42,10 @@ Rotation policy
 Custom log path
 ---------------
 
-Set the environment variable OOXML_LOG_FILE before launching the JAR or the packaged application.
-
 Windows PowerShell example:
 
   $env:OOXML_LOG_FILE = "$env:TEMP\ooxml-normalize.log"
-  .\OOXML-Compat-Normalize-Quarkus.exe
+  java -jar OOXML-Compat-Normalize-java-quarkus.jar
 
 Linux example:
 
@@ -36,4 +53,11 @@ Linux example:
 
 The log records startup, audit requests, normalization requests, selected profile, parser validation result, OOXML family, changed part count and errors. It does not intentionally log document contents.
 
-The local HTTP server binds to 127.0.0.1:8080 by default.
+Local UI
+--------
+
+The HTTP server binds intentionally to IPv4 loopback only:
+
+  http://127.0.0.1:8080/
+
+The Windows jpackage launcher opens that address automatically after the service is ready. If a browser resolves `localhost` to IPv6 (`::1`) first, `http://localhost:8080/` may fail even though the service is running; use the explicit 127.0.0.1 address above.

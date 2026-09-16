@@ -1,16 +1,63 @@
-name: Portable test release v0.4.0-rc.1
+name: Portable builds and release
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional release tag, e.g. v0.4.0. Leave empty for build-only.'
+        required: false
+        type: string
+      prerelease:
+        description: 'Publish as GitHub pre-release'
+        required: false
+        default: false
+        type: boolean
   push:
-    paths:
-      - '.github/workflows/portable-release.yml'
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
+  release_config:
+    name: Resolve release configuration
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.config.outputs.tag }}
+      prerelease: ${{ steps.config.outputs.prerelease }}
+      publish: ${{ steps.config.outputs.publish }}
+
+    steps:
+      - id: config
+        name: Resolve tag and release mode
+        shell: bash
+        env:
+          MANUAL_TAG: ${{ inputs.release_tag }}
+          MANUAL_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          TAG=""
+          PRERELEASE="false"
+          PUBLISH="false"
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            PUBLISH="true"
+            [[ "$TAG" == *-* ]] && PRERELEASE="true"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${MANUAL_TAG:-}" ]]; then
+            TAG="$MANUAL_TAG"
+            PRERELEASE="${MANUAL_PRERELEASE:-false}"
+            PUBLISH="true"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ matrix.rid }}
+    needs: release_config
     strategy:
       fail-fast: false
       matrix:
@@ -76,7 +123,13 @@ jobs:
           OPENXML_VALIDATOR_BIN: ${{ matrix.validator }}
         run: pyinstaller --clean --noconfirm portable/OOXMLCompatNormalize.spec
 
-      - name: Prepare artifact payload
+      - name: Smoke-test executable presence
+        shell: bash
+        run: |
+          ls -lah dist
+          test -n "$(find dist -maxdepth 1 -type f -name 'OOXML-Compat-Normalize*' -print -quit)"
+
+      - name: Prepare portable payload
         shell: bash
         run: |
           set -euo pipefail
@@ -94,7 +147,7 @@ jobs:
           (base / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
 
-      - name: Upload build artifact
+      - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -102,17 +155,18 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Create v0.4.0-rc.1 pre-release
-    needs: build
+    name: Publish GitHub Release
+    if: needs.release_config.outputs.publish == 'true'
+    needs: [release_config, build]
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download build artifacts
+      - name: Download all portable artifacts
         uses: actions/download-artifact@v4
         with:
           path: release
 
-      - name: Package release assets
+      - name: Create release archives and checksums
         shell: bash
         run: |
           set -euo pipefail
@@ -128,18 +182,24 @@ jobs:
           done
           sha256sum *.zip *.tar.gz > SHA256SUMS.txt
 
-      - name: Create GitHub pre-release and tag
+      - name: Create GitHub Release and tag
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release_config.outputs.tag }}
+          PRERELEASE: ${{ needs.release_config.outputs.prerelease }}
         run: |
           set -euo pipefail
-          gh release create 'v0.4.0-rc.1' \
+          EXTRA=()
+          if [[ "$PRERELEASE" == "true" ]]; then
+            EXTRA+=(--prerelease)
+          fi
+          gh release create "$TAG" \
             release/*.zip \
             release/*.tar.gz \
             release/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'v0.4.0-rc.1' \
-            --prerelease \
-            --notes 'Test release of ooxml-compat-normalize. Includes Windows x64 and Linux x64 portable builds. Each portable embeds the self-contained Microsoft Open XML SDK validator used by the pre-flight/post-flight validation bridge.'
+            --title "$TAG" \
+            --generate-notes \
+            "${EXTRA[@]}"

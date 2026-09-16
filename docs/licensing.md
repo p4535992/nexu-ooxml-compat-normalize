@@ -8,17 +8,19 @@ This document is an engineering/compliance summary, not legal advice. The author
 
 ## Python/Desktop normalization engine
 
-The package-preserving Python normalization engine uses the Python standard library for ZIP/OPC handling, XML inspection, hashing, CLI and the Tkinter GUI.
+The package-preserving Python normalization engine uses the Python standard library for ZIP/OPC handling, XML inspection, hashing, CLI, the lightweight HTTP/REST service and the Tkinter GUI.
 
 CPython is distributed under the Python Software Foundation License Version 2 together with licenses/notices for incorporated third-party software. Tk/Tcl components used by Tkinter have permissive Tcl/Tk licensing terms requiring preservation of their notices in redistributed copies.
 
 ## Microsoft Open XML SDK and .NET
 
-Desktop portable builds bundle a small self-contained .NET helper referencing **DocumentFormat.OpenXml (Microsoft Open XML SDK)**.
+Desktop portable builds and the Python Docker build bundle a small self-contained .NET helper referencing **DocumentFormat.OpenXml (Microsoft Open XML SDK)**.
 
 Open XML SDK is MIT licensed and is used as an independent structural validator before and after normalization.
 
 Do **not** describe every self-contained .NET runtime distribution as simply "MIT". Microsoft distinguishes source/package licensing from product/runtime-pack licensing. According to the .NET licensing model, Linux/macOS product distributions use MIT while Windows product distributions use the applicable .NET Library License; exact runtime packs also carry their own third-party notices. Portable releases should retain the license and third-party notice material applicable to the exact runtime pack used by CI.
+
+The Python Docker image copies the .NET SDK/runtime license and `ThirdPartyNotices.txt` used by its validator build into `/app/licenses/dotnet/` so the locally built image retains that material alongside the project notices.
 
 ## PyInstaller
 
@@ -54,9 +56,14 @@ The Classpath Exception prevents normal use/linking of the Java class libraries 
 
 ## Docker
 
-The repository provides a Dockerfile and Docker Compose configuration that build the Quarkus service locally from Docker Official Maven/Temurin images.
+The repository provides two local Docker Compose stacks:
 
-The project does not currently publish a prebuilt Docker image. The final local image includes the project's license summaries and inherits the Eclipse Temurin/OpenJDK runtime legal material from the base image. If prebuilt images are published later, the exact base-image/runtime licenses and Java dependency inventory must be treated as release artifacts.
+- `docker-compose.java.yml` builds the Quarkus/Java service from Docker Official Maven/Temurin images;
+- `docker-compose.python.yml` builds the Python HTTP/REST service from the official Python image and a .NET SDK build stage used to publish the Open XML SDK validator.
+
+The project does not currently publish prebuilt Docker images. Java and Python images are built locally. Each final image contains the project's license summaries; the Java image inherits the Eclipse Temurin/OpenJDK runtime legal material from the base image, while the Python image preserves the .NET validator build license/third-party notice material under `/app/licenses/dotnet/`.
+
+If prebuilt images are published later, the exact base-image/runtime licenses and dependency inventory must be treated as release artifacts.
 
 ## Office suites
 

@@ -23,7 +23,9 @@ $AppName = "OOXML-Compat-Normalize-Quarkus"
 $InputDirectory = Join-Path $Destination "input"
 $RuntimeImage = Join-Path $Destination "runtime-image"
 $AppImage = Join-Path $Destination $AppName
-$PortableArchive = Join-Path $Destination "OOXML-Compat-Normalize-java-portable-win-x64.zip"
+$PortableRootName = "OOXML-Compat-Normalize-java-portable-win-x64"
+$PortableRoot = Join-Path $Destination $PortableRootName
+$PortableArchive = Join-Path $Destination "$PortableRootName.zip"
 $InstallerName = "OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe"
 $InstallerTarget = Join-Path $Destination $InstallerName
 $UpgradeUuid = "c9151607-860b-4a4f-96a1-cc9d03179060"
@@ -66,7 +68,7 @@ if ($LASTEXITCODE -ne 0) {
 #   $APPDIR  -> <image-root>\app
 #   $ROOTDIR -> <image-root>, beside the launcher EXE.
 # We deliberately use ROOTDIR so the portable log behaves like NexU and lives
-# under <extracted-zip>\OOXML-Compat-Normalize-Quarkus\logs.
+# under the extracted portable folder's logs directory.
 $ImageArguments = @(
     "--type", "app-image",
     "--name", $AppName,
@@ -126,10 +128,34 @@ if (Test-Path -LiteralPath $LauncherCfg -PathType Leaf) {
     Get-Content -LiteralPath $LauncherCfg
 }
 
+# Release archives always contain exactly one first-level directory whose name
+# matches the archive file (without .zip). The jpackage image keeps its launcher
+# name internally, but its contents are staged under the public portable name.
+if (Test-Path -LiteralPath $PortableRoot) {
+    Remove-Item -LiteralPath $PortableRoot -Recurse -Force
+}
+New-Item -ItemType Directory -Path $PortableRoot | Out-Null
+Get-ChildItem -LiteralPath $AppImage -Force | Copy-Item -Destination $PortableRoot -Recurse -Force
+
 if (Test-Path -LiteralPath $PortableArchive) {
     Remove-Item -LiteralPath $PortableArchive -Force
 }
-Compress-Archive -Path $AppImage -DestinationPath $PortableArchive -CompressionLevel Optimal
+Compress-Archive -Path $PortableRoot -DestinationPath $PortableArchive -CompressionLevel Optimal
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$Zip = [System.IO.Compression.ZipFile]::OpenRead($PortableArchive)
+try {
+    $ExpectedPrefix = "$PortableRootName/"
+    $BadEntry = $Zip.Entries | Where-Object {
+        $name = $_.FullName.Replace('\\', '/')
+        $name -and -not $name.StartsWith($ExpectedPrefix, [System.StringComparison]::Ordinal)
+    } | Select-Object -First 1
+    if ($BadEntry) {
+        throw "Portable ZIP contains an entry outside $PortableRootName/: $($BadEntry.FullName)"
+    }
+} finally {
+    $Zip.Dispose()
+}
 
 $InstallerArguments = @(
     "--type", "exe",
@@ -165,8 +191,9 @@ if (Test-Path -LiteralPath $InstallerTarget) {
 Move-Item -LiteralPath $GeneratedInstaller.FullName -Destination $InstallerTarget
 
 Write-Host "Application image: $AppImage"
+Write-Host "Portable root: $PortableRoot"
 Write-Host "Portable archive: $PortableArchive"
 Write-Host "Windows installer: $InstallerTarget"
 Write-Host "Primary launcher: $(Join-Path $AppImage "$AppName.exe")"
-Write-Host "Portable logs: $(Join-Path $AppImage 'logs')"
-Write-Host "Diagnostic log guide: $(Join-Path $AppImage 'LOGS.txt')"
+Write-Host "Portable logs: $(Join-Path $PortableRoot 'logs')"
+Write-Host "Diagnostic log guide: $(Join-Path $PortableRoot 'LOGS.txt')"

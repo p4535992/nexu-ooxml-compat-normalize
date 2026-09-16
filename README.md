@@ -128,7 +128,9 @@ The default behavior is **preserve font identity and semantics**:
 
 The non-default modes are **environment/user policy**, not part of the canonical representation.
 
-## Python CLI
+## Python CLI and web service
+
+CLI:
 
 ```bash
 ooxml-compat-normalize input.docx --audit-only --report preflight.json
@@ -137,6 +139,20 @@ ooxml-compat-normalize input.docx output.docx \
   --profile interop-transitional-v1 \
   --report output.report.json
 ```
+
+The Python package also exposes a lightweight standard-library HTTP service:
+
+```bash
+ooxml-compat-normalize-web
+```
+
+By default it listens on:
+
+```text
+http://127.0.0.1:8080/
+```
+
+It uses the same Python normalization engine as the CLI; it is not a separate implementation.
 
 ## Python desktop portable
 
@@ -231,7 +247,7 @@ Portable Quarkus distributions keep logs **inside the extracted application dire
 Windows portable:
 
 ```text
-OOXML-Compat-Normalize-Quarkus/
+OOXML-Compat-Normalize-java-portable-win-x64/
 ├─ OOXML-Compat-Normalize-Quarkus.exe
 ├─ LOGS.txt
 └─ logs/
@@ -247,8 +263,6 @@ For the raw JAR, the default is relative to the directory from which it is launc
 ```
 
 The rotation policy is 10 MB × 5 backups with rotate-on-start. Raw-JAR launches can override the file with `OOXML_LOG_FILE`. Logs include startup, audit/normalization operations, selected profile, validation status and error information; the application does not intentionally log document contents.
-
-The CI explicitly tests the real `/` HTML page and the portable log location; it no longer treats `/api/info` alone as sufficient UI validation.
 
 See [`quarkus/README.md`](quarkus/README.md) and [`quarkus/jpackage/LOGS.txt`](quarkus/jpackage/LOGS.txt).
 
@@ -281,21 +295,91 @@ The same build also creates a Windows per-user installer:
 OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe
 ```
 
-The installer adds the normal Windows launcher/shortcut while preserving the same loopback-only Quarkus behavior and file logging.
+On Linux the portable contains the bundled runtime, both Java JARs, launchers, notices and `logs/` directory. No global Java installation is required.
 
-On Linux the portable contains:
+## Java o Python: quale normalizzatore è migliore?
+
+The project intentionally keeps **two independent normalization runtimes**. The goal is not to make one language win, but to converge both implementations toward the same OOXML semantics and use the differences as an additional regression signal.
+
+| Area | Python engine | Java engine |
+| --- | --- | --- |
+| Current normalization rule coverage | **More complete today** | Growing toward parity |
+| DOCX advanced interoperability rules | **Reference implementation today** | Partial parity |
+| XLSX advanced interoperability rules | **Reference implementation today** | Partial parity |
+| PPTX advanced interoperability rules | **Reference implementation today** | Partial parity |
+| Independent structural validation | Microsoft Open XML SDK | Apache POI + docx4j |
+| Desktop GUI | **Tkinter portable** | Browser UI through Quarkus |
+| Library integration | Python package | **Native Java JAR** |
+| REST/server use | Standard-library HTTP service | **Quarkus is the more natural production server runtime** |
+| Docker deployment | Supported | **Especially natural with Quarkus** |
+
+**For maximum normalization coverage today, use the Python engine.** It currently contains the broader set of verified theme, style, table, spreadsheet and presentation portability rules.
+
+**For Java application integration, REST services and container/server deployment, use the Java core + Quarkus.** It has a native Java API, POI/docx4j cross-parser checks and a server runtime designed for this use case.
+
+Neither choice changes the interoperability goal: both must preserve the OOXML family, avoid editor round-trips, preserve unknown/vendor parts and converge toward the same N → normalized OOXML → N behavior. The roadmap therefore prioritizes **Java/Python rule parity plus shared regression fixtures** rather than replacing one engine with the other.
+
+## Docker Compose: Java and Python web/API stacks
+
+Two dedicated compose files expose the tool through a browser and REST API:
 
 ```text
-runtime/
-OOXML-Compat-Normalize-java-core.jar
-OOXML-Compat-Normalize-java-quarkus.jar
-ooxml-normalize
-ooxml-quarkus
-LOGS.txt
-logs/
+docker-compose.java.yml
+docker-compose.python.yml
 ```
 
-No global Java installation is required for either portable package.
+Both publish **`127.0.0.1:8080` by default** and expose the same endpoint paths.
+
+Java/Quarkus:
+
+```bash
+docker compose -f docker-compose.java.yml up --build -d
+```
+
+Python + bundled self-contained Open XML SDK validator:
+
+```bash
+docker compose -f docker-compose.python.yml up --build -d
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8080/
+```
+
+Only one stack can use host port 8080 at a time. To run both simultaneously, assign a different host port to one of them, for example:
+
+```bash
+docker compose -f docker-compose.java.yml up --build -d
+OOXML_PORT=8081 docker compose -f docker-compose.python.yml up --build -d
+```
+
+### Shared REST contract
+
+Both stacks expose:
+
+```text
+GET  /api/info
+POST /api/audit
+POST /api/normalize?profile=interop-transitional-v1
+```
+
+For audit/normalization requests, send the raw DOCX/XLSX/PPTX as `application/octet-stream` and supply the original filename in the `X-Filename` header.
+
+Example:
+
+```bash
+curl -f \
+  -X POST \
+  -H "Content-Type: application/octet-stream" \
+  -H "X-Filename: document.docx" \
+  --data-binary @document.docx \
+  "http://127.0.0.1:8080/api/normalize?profile=interop-transitional-v1" \
+  -o document-normalized.docx
+```
+
+The same HTTP client code can therefore target either engine. See [`docker/README.md`](docker/README.md) for complete `curl`, Python `urllib.request` and Java `HttpClient` examples, log handling, port overrides and CI coverage.
 
 ## Release artifact naming
 
@@ -326,14 +410,14 @@ OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe
 SHA256SUMS.txt
 ```
 
-All artifacts in a release are built from the same commit by GitHub Actions.
+All portable archives contain exactly one first-level directory whose name matches the archive filename without its archive extension.
 
 ## Tooling
 
 The project deliberately separates normalization from validation and delivery:
 
-- **Python standard library** — primary package-preserving normalization/audit engine;
-- **Microsoft Open XML SDK** — independent structural validation embedded in Python desktop portable builds;
+- **Python standard library** — primary package-preserving normalization/audit engine plus lightweight local HTTP/REST service;
+- **Microsoft Open XML SDK** — independent structural validation embedded in Python desktop and Python Docker builds;
 - **.NET self-contained publish** — bundles that validator without requiring a .NET installation;
 - **Tkinter + PyInstaller** — Python desktop GUI and one-file Windows/Linux distributions;
 - **Apache POI 5.5.1** — Java cross-format OPC/OOXML parser;
@@ -342,6 +426,8 @@ The project deliberately separates normalization from validation and delivery:
 - **Maven + Maven Shade Plugin** — Java library, executable core JAR and Quarkus build;
 - **Eclipse Temurin/OpenJDK 17 + jlink** — bundled Java runtime;
 - **jpackage + WiX** — Windows Java app-image, `.exe` launcher and installer;
+- **Docker / Docker Compose** — independent Java and Python web/API deployments;
+- **CycloneDX SBOM** — Java dependency/license inventory used by CI;
 - **GitHub Actions / GitHub CLI** — reproducible builds, checksums and release publication.
 
 ## Safety properties
@@ -355,7 +441,7 @@ The project deliberately separates normalization from validation and delivery:
 - ZIP integrity and post-flight parsing are checked;
 - font substitution is disabled by default;
 - risky structures are preserved + reported instead of flattened;
-- Quarkus listens only on the IPv4 loopback address by default.
+- local web services bind to host loopback by default; Docker requires an explicit opt-in to expose the mapped port on other interfaces.
 
 ## Development
 
@@ -364,6 +450,7 @@ Python:
 ```bash
 python -m pip install -e .
 python -m unittest discover -s tests -v
+ooxml-compat-normalize-web
 ```
 
 Java core:
@@ -379,6 +466,18 @@ mvn -f java/pom.xml install
 mvn -f quarkus/pom.xml clean verify package
 ```
 
+Docker Java:
+
+```bash
+docker compose -f docker-compose.java.yml up --build -d
+```
+
+Docker Python:
+
+```bash
+docker compose -f docker-compose.python.yml up --build -d
+```
+
 ## Roadmap
 
 1. more complete Word table width/cell margin/section compatibility fixtures;
@@ -387,21 +486,19 @@ mvn -f quarkus/pom.xml clean verify package
 4. Excel date/locale/number-format interoperability fixtures;
 5. conditional-format equivalence and drawing-anchor regression fixtures;
 6. broader PowerPoint master/layout/theme/autofit regression fixtures;
-7. increase Java/Python rule parity;
+7. increase Java/Python rule parity using a shared licensed/generated regression corpus;
 8. optional renderer-comparison harnesses outside the core normalizer.
 
 ## License
 
-The project source code is **MIT licensed**. Runtime/build dependencies are free/open source.
+The project source code is **MIT licensed**. Runtime/build dependencies are free/open source under their respective terms.
 
-Python desktop portable builds use Microsoft Open XML SDK (MIT), .NET, Python, Tcl/Tk and PyInstaller under their respective licenses.
+Python desktop/Docker builds use Microsoft Open XML SDK (MIT), .NET runtime components, Python, Tcl/Tk where applicable and PyInstaller where applicable under their respective licenses/notices.
 
-The Java core uses **Apache POI 5.5.1** and **docx4j 17.1.0**, both Apache License 2.0, plus their Maven-resolved transitive open-source dependencies.
+The Java core uses **Apache POI 5.5.1** and **docx4j 17.1.0**, both Apache License 2.0, plus Maven-resolved transitive open-source dependencies. Quarkus is Apache-2.0; its transitive dependencies retain their own licenses.
 
-The Quarkus local service uses **Quarkus 3.39.3**, licensed under Apache License 2.0, plus compatible open-source dependencies.
-
-Java portable distributions bundle a runtime derived from **Eclipse Temurin/OpenJDK 17**. OpenJDK is distributed under **GPL-2.0 with the Classpath Exception**, plus the applicable third-party notices. This does not change the MIT license of this project's source code, but the runtime's license/notices travel with the portable distribution.
+Java portable distributions bundle Eclipse Temurin/OpenJDK runtime material. OpenJDK core licensing includes GPL-2.0 with the Classpath Exception, while the exact runtime distribution also carries applicable third-party licenses/notices; the runtime `legal/` material is authoritative for the shipped build.
 
 LibreOffice, ONLYOFFICE and Microsoft Office are interoperability peers only: their binaries are not linked, invoked or redistributed. Font binaries are not bundled.
 
-See [`LICENSE`](LICENSE), [`docs/licensing.md`](docs/licensing.md), [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+See [`LICENSE`](LICENSE), [`docs/licensing.md`](docs/licensing.md), [`docs/licensing-audit.md`](docs/licensing-audit.md), [`docs/test-corpus-policy.md`](docs/test-corpus-policy.md), [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).

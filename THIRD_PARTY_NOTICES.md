@@ -1,18 +1,19 @@
 # Third-party notices
 
-This project source is MIT licensed. Release artifacts can bundle the following free/open-source components.
+This project source is MIT licensed. Release artifacts and locally built container images can bundle the following free/open-source components.
 
 ## Microsoft Open XML SDK
 
 - Component: `DocumentFormat.OpenXml`
-- Purpose: independent DOCX/XLSX/PPTX structural validation in Windows/Linux desktop portable builds
+- Purpose: independent DOCX/XLSX/PPTX structural validation in Windows/Linux desktop portable builds and the Python Docker image
 - License: MIT
 
 ## .NET self-contained runtime
 
-- Purpose: runtime for the Open XML SDK validator helper
-- Licensing: exact product/runtime-pack license plus third-party notices for the platform/build used by CI
+- Purpose: runtime for the Open XML SDK validator helper used by desktop portable builds and the Python Docker image
+- Licensing: exact product/runtime-pack license plus third-party notices for the platform/build used by CI or the Docker build stage
 - Important: do not treat every .NET product/runtime distribution as universally MIT; Microsoft documents different product-distribution licensing for Windows versus Linux/macOS
+- Python Docker: validator build license and `ThirdPartyNotices.txt` are copied to `/app/licenses/dotnet/`
 - End-user installation required: no
 
 ## Python / Tcl/Tk / PyInstaller
@@ -20,7 +21,7 @@ This project source is MIT licensed. Release artifacts can bundle the following 
 - CPython: Python Software Foundation License Version 2 plus incorporated third-party licenses/notices
 - Tcl/Tk: permissive Tcl/Tk license terms; notices must be retained in redistributed copies
 - PyInstaller: GPL-2.0-or-later with the PyInstaller bootloader exception for bundled applications (with some files under Apache-2.0)
-- Purpose: primary desktop engine/GUI and one-file Windows/Linux desktop distributions
+- Purpose: primary Python engine, local HTTP/REST service, desktop GUI and one-file Windows/Linux desktop distributions
 
 ## Apache POI
 
@@ -45,7 +46,7 @@ This project source is MIT licensed. Release artifacts can bundle the following 
 
 ## Eclipse Temurin / OpenJDK 17 runtime
 
-- Purpose: runtime bundled in the Windows/Linux Java portable archives produced with `jlink`, and runtime used by the local Docker image
+- Purpose: runtime bundled in the Windows/Linux Java portable archives produced with `jlink`, and runtime used by the local Java Docker image
 - Licensing: OpenJDK/Temurin distributions contain multiple applicable license/notice sets; OpenJDK class-library/runtime code commonly uses GPL-2.0 with the Classpath Exception
 - Required material: preserve the exact runtime `legal/` directory and upstream notices from the binary actually redistributed
 - End-user Java installation required: no for the Java portable archives
@@ -66,7 +67,12 @@ The authoritative license texts and notices are those shipped by the exact compo
 
 ## Docker
 
-`Dockerfile`/`docker-compose.yml` build the Quarkus service locally from Docker Official Maven and Eclipse Temurin images. The project does not currently publish a prebuilt Docker image. See `docker/README.md` and `docs/licensing-audit.md`.
+The repository provides two local stacks:
+
+- `Dockerfile` + `docker-compose.java.yml` for the Java/Quarkus service;
+- `Dockerfile.python` + `docker-compose.python.yml` for the Python HTTP/REST service with the self-contained Open XML SDK validator.
+
+The project does not currently publish prebuilt Docker images. See `docker/README.md` and `docs/licensing-audit.md`.
 
 ## Not bundled
 

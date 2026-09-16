@@ -1,0 +1,192 @@
+name: Bootstrap v0.4.0-rc.1 and portable release
+
+on:
+  push:
+    paths:
+      - '.release-bootstrap/source.zip.b64'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync renamed v0.4 source to main
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decode source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ooxml-source
+          base64 -d .release-bootstrap/source.zip.b64 > /tmp/ooxml-source.zip
+          unzip -q /tmp/ooxml-source.zip -d /tmp/ooxml-source
+
+      - name: Synchronize repository contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --delete --exclude '.git/' /tmp/ooxml-source/ ./
+          test -f pyproject.toml
+          test -f src/ooxml_compat_normalize/normalizer.py
+          test ! -e src/docx_compat_normalizer
+          ! grep -RIn --exclude-dir='.git' --exclude='*.pyc' -E 'docx[-_ ]compat[-_ ]normalizer|docx_compat_normalizer|docx-compat-normalizer|docx-compat-normalize' .
+
+      - name: Run source tests before commit
+        shell: bash
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+
+      - id: commit
+        name: Commit synchronized source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'release: prepare ooxml-compat-normalize v0.4.0-rc.1'
+          git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.rid }}
+    needs: sync
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            artifact: OOXML-Compat-Normalize-win-x64
+            validator: dotnet/OpenXmlSdkValidator/bin/Release/net8.0/win-x64/publish/OpenXmlSdkValidator.exe
+          - os: ubuntu-22.04
+            rid: linux-x64
+            artifact: OOXML-Compat-Normalize-linux-x64
+            validator: dotnet/OpenXmlSdkValidator/bin/Release/net8.0/linux-x64/publish/OpenXmlSdkValidator
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout synchronized source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install Linux GUI prerequisites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tk-dev tcl-dev
+
+      - name: Run tests
+        shell: bash
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+
+      - name: Verify Tkinter
+        shell: bash
+        run: python -c "import tkinter; print('Tk', tkinter.TkVersion)"
+
+      - name: Publish Open XML SDK validator
+        shell: bash
+        run: >-
+          dotnet publish dotnet/OpenXmlSdkValidator/OpenXmlSdkValidator.csproj
+          -c Release
+          -r ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+
+      - name: Install PyInstaller
+        shell: bash
+        run: python -m pip install --upgrade pip "pyinstaller>=6.10"
+
+      - name: Build one-file GUI executable
+        shell: bash
+        env:
+          OPENXML_VALIDATOR_BIN: ${{ matrix.validator }}
+        run: pyinstaller --clean --noconfirm portable/OOXMLCompatNormalize.spec
+
+      - name: Prepare payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p payload
+          cp dist/OOXML-Compat-Normalize* payload/
+          cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md payload/
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          base = Path('payload')
+          lines = []
+          for p in sorted(base.glob('OOXML-Compat-Normalize*')):
+              if p.is_file():
+                  lines.append(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}")
+          (base / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: payload/
+          if-no-files-found: error
+
+  release:
+    name: Publish v0.4.0-rc.1 pre-release
+    needs: [sync, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+
+      - name: Package release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          for dir in OOXML-Compat-Normalize-*; do
+            [ -d "$dir" ] || continue
+            if [[ "$dir" == *win-* ]]; then
+              (cd "$dir" && zip -9 -r "../${dir}.zip" .)
+            else
+              chmod +x "$dir"/OOXML-Compat-Normalize || true
+              tar -C "$dir" -czf "${dir}.tar.gz" .
+            fi
+          done
+          sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+
+      - name: Create GitHub pre-release and tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ needs.sync.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh release create 'v0.4.0-rc.1' \
+            release/*.zip \
+            release/*.tar.gz \
+            release/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title 'v0.4.0-rc.1' \
+            --prerelease \
+            --notes 'Test release for the renamed ooxml-compat-normalize project. Includes Windows x64 and Linux x64 portable builds with the self-contained Open XML SDK validator.'

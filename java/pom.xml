@@ -6,7 +6,7 @@
 
   <groupId>io.github.p4535992</groupId>
   <artifactId>ooxml-compat-normalize-java</artifactId>
-  <version>0.4.0-rc.3</version>
+  <version>0.4.0-rc.4</version>
   <name>ooxml-compat-normalize Java CLI</name>
   <description>Loss-averse OOXML normalizer and cross-parser validator for DOCX/XLSX/PPTX.</description>
   <url>https://github.com/p4535992/ooxml-compat-normalize</url>
@@ -30,14 +30,11 @@
   </properties>
 
   <dependencies>
-    <!-- Apache 2.0. Cross-format OPC/OOXML parser (DOCX/XLSX/PPTX). -->
     <dependency>
       <groupId>org.apache.poi</groupId>
       <artifactId>poi-ooxml</artifactId>
       <version>${poi.version}</version>
     </dependency>
-
-    <!-- Apache 2.0. Independent OOXML package/model parser. -->
     <dependency>
       <groupId>org.docx4j</groupId>
       <artifactId>docx4j-core</artifactId>
@@ -48,8 +45,6 @@
       <artifactId>docx4j-JAXB-ReferenceImpl</artifactId>
       <version>${docx4j.version}</version>
     </dependency>
-
-    <!-- Quiet bridges: keep library diagnostics available to callers without noisy provider warnings. -->
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-to-slf4j</artifactId>
@@ -62,7 +57,6 @@
       <version>${slf4j.version}</version>
       <scope>runtime</scope>
     </dependency>
-
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -86,9 +80,7 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.5.4</version>
-        <configuration>
-          <useModulePath>false</useModulePath>
-        </configuration>
+        <configuration><useModulePath>false</useModulePath></configuration>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

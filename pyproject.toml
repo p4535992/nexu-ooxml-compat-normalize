@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ooxml-compat-normalize"
-version = "0.4.0rc3"
+version = "0.4.0rc4"
 description = "Loss-averse OOXML normalizer for DOCX/XLSX/PPTX cross-suite interoperability"
 readme = "README.md"
 requires-python = ">=3.10"

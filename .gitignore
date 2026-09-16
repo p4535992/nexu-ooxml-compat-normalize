@@ -15,3 +15,5 @@ dist/
 .build-venv/
 *.spec
 java/target/
+quarkus/target/
+docker-data/

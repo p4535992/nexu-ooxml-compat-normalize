@@ -53,11 +53,19 @@ Linux example:
 
 The log records startup, audit requests, normalization requests, selected profile, parser validation result, OOXML family, changed part count and errors. It does not intentionally log document contents.
 
-Local UI
---------
+Local UI and context path
+-------------------------
 
-The HTTP server binds intentionally to IPv4 loopback only:
+The HTTP server binds intentionally to IPv4 loopback only. The default application context path is:
 
-  http://127.0.0.1:8080/
+  /ooxml-compat-normalize
 
-The Windows jpackage launcher opens that address automatically after the service is ready. If a browser resolves `localhost` to IPv6 (`::1`) first, `http://localhost:8080/` may fail even though the service is running; use the explicit 127.0.0.1 address above.
+so the UI is available at:
+
+  http://127.0.0.1:8080/ooxml-compat-normalize/
+
+and the REST API begins at:
+
+  http://127.0.0.1:8080/ooxml-compat-normalize/api/
+
+The context path can be changed with OOXML_CONTEXT_PATH. The Windows jpackage launcher and open-ui.cmd use the same setting. If a browser resolves `localhost` to IPv6 (`::1`) first, the localhost URL may fail even though the service is running; use the explicit 127.0.0.1 address above.

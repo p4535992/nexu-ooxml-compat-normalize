@@ -64,9 +64,10 @@ jobs:
           rm -rf docker-bundle-work docker-release
           mkdir -p docker-bundle-work docker-release
 
-          JAVA_ROOT='docker-bundle-work/OOXML-Compat-Normalize-docker-java'
-          PYTHON_ROOT='docker-bundle-work/OOXML-Compat-Normalize-docker-python'
-          COMBINED_ROOT='docker-bundle-work/OOXML-Compat-Normalize-docker-combined'
+          # Keep the established Java/Python release asset names for compatibility.
+          JAVA_ROOT='docker-bundle-work/OOXML-Compat-Normalize-java-docker-compose'
+          PYTHON_ROOT='docker-bundle-work/OOXML-Compat-Normalize-python-docker-compose'
+          COMBINED_ROOT='docker-bundle-work/OOXML-Compat-Normalize-combined-docker-compose'
 
           mkdir -p "$JAVA_ROOT" "$PYTHON_ROOT" "$COMBINED_ROOT"
 
@@ -115,7 +116,7 @@ jobs:
           import zipfile
 
           out = Path('docker-release')
-          archives = sorted(out.glob('OOXML-Compat-Normalize-docker-*.zip')) + sorted(out.glob('OOXML-Compat-Normalize-docker-*.tar.gz'))
+          archives = sorted(out.glob('OOXML-Compat-Normalize-*-docker-compose.zip')) + sorted(out.glob('OOXML-Compat-Normalize-*-docker-compose.tar.gz'))
           if len(archives) != 6:
               raise SystemExit(f'Expected 6 Docker archives, found {len(archives)}')
 

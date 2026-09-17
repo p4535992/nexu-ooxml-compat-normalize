@@ -19,7 +19,23 @@ from .sdk_validator import validate_with_openxml_sdk
 
 ALLOWED_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
 DEFAULT_PROFILE = "interop-transitional-v1"
+DEFAULT_CONTEXT_PATH = "/ooxml-compat-normalize"
 MAX_BODY_SIZE = int(os.environ.get("OOXML_MAX_BODY_SIZE", str(256 * 1024 * 1024)))
+
+
+def _normalize_context_path(raw: str | None) -> str:
+    value = (raw or DEFAULT_CONTEXT_PATH).strip()
+    if not value or value == "/":
+        value = DEFAULT_CONTEXT_PATH
+    if not value.startswith("/"):
+        value = "/" + value
+    value = "/" + "/".join(segment for segment in value.split("/") if segment)
+    return value.rstrip("/")
+
+
+CONTEXT_PATH = _normalize_context_path(os.environ.get("OOXML_CONTEXT_PATH"))
+UI_PATH = CONTEXT_PATH + "/"
+API_BASE = CONTEXT_PATH + "/api"
 
 INDEX_HTML = """<!doctype html>
 <html lang="it">
@@ -63,12 +79,12 @@ INDEX_HTML = """<!doctype html>
       return r;
     }
     document.getElementById('audit').addEventListener('click',async()=>{
-      try{const f=selected();status.textContent='Analisi…';const r=await post('/api/audit',f);const j=await r.json();status.textContent=JSON.stringify(j,null,2);}catch(e){status.textContent='Errore: '+e.message;}
+      try{const f=selected();status.textContent='Analisi…';const r=await post('api/audit',f);const j=await r.json();status.textContent=JSON.stringify(j,null,2);}catch(e){status.textContent='Errore: '+e.message;}
     });
     document.getElementById('normalize').addEventListener('click',async()=>{
       try{
         const f=selected();status.textContent='Normalizzazione…';
-        const r=await post('/api/normalize?profile='+encodeURIComponent(profile.value),f);
+        const r=await post('api/normalize?profile='+encodeURIComponent(profile.value),f);
         const blob=await r.blob();
         const cd=r.headers.get('Content-Disposition')||'';
         const m=/filename=\"([^\"]+)\"/.exec(cd);const name=m?m[1]:'normalized-'+f.name;
@@ -150,6 +166,12 @@ class OoxmlRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _redirect(self, location: str) -> None:
+        self.send_response(HTTPStatus.TEMPORARY_REDIRECT)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _read_body(self) -> bytes:
         raw_length = self.headers.get("Content-Length")
         if raw_length is None:
@@ -166,7 +188,10 @@ class OoxmlRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        if path == "/":
+        if path == "/" or path == CONTEXT_PATH:
+            self._redirect(UI_PATH)
+            return
+        if path == UI_PATH:
             data = INDEX_HTML.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -174,12 +199,13 @@ class OoxmlRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
-        if path == "/api/info":
+        if path == API_BASE + "/info":
             self._send_json(
                 {
                     "name": "ooxml-compat-normalize-python",
                     "version": __version__,
                     "engine": "python",
+                    "contextPath": CONTEXT_PATH,
                     "formats": ["docx", "xlsx", "pptx"],
                     "profiles": list(PROFILE_BY_NAME),
                 }
@@ -192,10 +218,10 @@ class OoxmlRequestHandler(BaseHTTPRequestHandler):
         try:
             filename = _safe_filename(self.headers.get("X-Filename"))
             body = self._read_body()
-            if parsed.path == "/api/audit":
+            if parsed.path == API_BASE + "/audit":
                 self._audit(filename, body)
                 return
-            if parsed.path == "/api/normalize":
+            if parsed.path == API_BASE + "/normalize":
                 profile = parse_qs(parsed.query).get("profile", [DEFAULT_PROFILE])[0]
                 self._normalize(filename, body, profile)
                 return
@@ -290,7 +316,12 @@ def main() -> None:
     host = os.environ.get("OOXML_HTTP_HOST", "127.0.0.1")
     port = int(os.environ.get("OOXML_HTTP_PORT", "8080"))
     server = ThreadingHTTPServer((host, port), OoxmlRequestHandler)
-    LOG.info("OOXML Compat Normalize Python web service started on %s:%d", host, port)
+    LOG.info(
+        "OOXML Compat Normalize Python web service started on %s:%d%s/",
+        host,
+        port,
+        CONTEXT_PATH,
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

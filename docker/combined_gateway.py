@@ -18,9 +18,12 @@ from urllib.request import Request, urlopen
 
 DEFAULT_CONTEXT_PATH = "/ooxml-compat-normalize"
 DEFAULT_ENGINE = os.environ.get("OOXML_DEFAULT_ENGINE", "python").strip().lower() or "python"
+STARTUP_MODE = os.environ.get("OOXML_ENGINE_MODE", "both").strip().lower() or "both"
 MAX_BODY_SIZE = int(os.environ.get("OOXML_MAX_BODY_SIZE", str(256 * 1024 * 1024)))
 JAVA_PORT = int(os.environ.get("OOXML_JAVA_INTERNAL_PORT", "18081"))
 PYTHON_PORT = int(os.environ.get("OOXML_PYTHON_INTERNAL_PORT", "18082"))
+ENGINE_ORDER = ("python", "java")
+ALLOWED_MODES = {"both", "python", "java"}
 
 
 def normalize_context_path(raw: str | None) -> str:
@@ -42,7 +45,9 @@ BACKENDS = {
 }
 
 if DEFAULT_ENGINE not in BACKENDS:
-    raise SystemExit(f"OOXML_DEFAULT_ENGINE must be one of: {', '.join(BACKENDS)}")
+    raise SystemExit(f"OOXML_DEFAULT_ENGINE must be one of: {', '.join(ENGINE_ORDER)}")
+if STARTUP_MODE not in ALLOWED_MODES:
+    raise SystemExit("OOXML_ENGINE_MODE must be one of: both, python, java")
 
 INDEX_HTML = """<!doctype html>
 <html lang="it">
@@ -51,7 +56,7 @@ INDEX_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OOXML Compat Normalize - Java + Python</title>
   <style>
-    body{font-family:system-ui,sans-serif;max-width:820px;margin:40px auto;padding:0 18px;line-height:1.45}
+    body{font-family:system-ui,sans-serif;max-width:860px;margin:40px auto;padding:0 18px;line-height:1.45}
     fieldset{border:1px solid #bbb;border-radius:8px;padding:18px;margin:18px 0}
     button,select,input{font:inherit;padding:8px 10px;margin:4px}
     button{cursor:pointer}.muted{color:#666}.status{white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:6px;min-height:44px}
@@ -60,16 +65,27 @@ INDEX_HTML = """<!doctype html>
 </head>
 <body>
   <h1>OOXML Compat Normalize</h1>
-  <p class="muted">Container combinato. Scegli il motore Java/Quarkus oppure Python prima di analizzare o normalizzare il documento.</p>
+  <p class="muted">Container combinato. Di default sono attivi Python + Java; puoi anche lasciare attivo un solo motore.</p>
 
   <fieldset>
-    <legend>Motore</legend>
+    <legend>Modalità motori</legend>
+    <div class="engine-row">
+      <label for="mode">Modalità:</label>
+      <select id="mode">
+        <option value="both">Python + Java</option>
+        <option value="python">Solo Python</option>
+        <option value="java">Solo Java / Quarkus</option>
+      </select>
+      <button id="applyMode" type="button">Applica modalità</button>
+      <span id="modeInfo" class="engine-info">Caricamento modalità…</span>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Motore per l'operazione</legend>
     <div class="engine-row">
       <label for="engine">Engine:</label>
-      <select id="engine">
-        <option value="python">Python</option>
-        <option value="java">Java / Quarkus</option>
-      </select>
+      <select id="engine"></select>
       <span id="engineInfo" class="engine-info">Caricamento informazioni…</span>
     </div>
   </fieldset>
@@ -94,14 +110,42 @@ INDEX_HTML = """<!doctype html>
     const profile=document.getElementById('profile');
     const engine=document.getElementById('engine');
     const engineInfo=document.getElementById('engineInfo');
+    const mode=document.getElementById('mode');
+    const modeInfo=document.getElementById('modeInfo');
 
     function selected(){const f=fileInput.files[0];if(!f)throw new Error('Seleziona un file.');return f;}
     function engineQuery(){return 'engine='+encodeURIComponent(engine.value);}
 
+    function applyModeState(j){
+      mode.value=j.mode;
+      modeInfo.textContent='Attivi: '+j.enabledEngines.join(' + ');
+      const old=engine.value;
+      engine.innerHTML='';
+      for(const value of j.enabledEngines){
+        const option=document.createElement('option');
+        option.value=value;
+        option.textContent=value==='java'?'Java / Quarkus':'Python';
+        engine.appendChild(option);
+      }
+      if(j.enabledEngines.includes(old))engine.value=old;
+      else if(j.enabledEngines.includes(j.defaultEngine))engine.value=j.defaultEngine;
+      else engine.value=j.enabledEngines[0];
+      engine.disabled=j.enabledEngines.length===1;
+    }
+
+    async function loadMode(){
+      const r=await fetch('api/mode');
+      if(!r.ok)throw new Error((await r.text())||('HTTP '+r.status));
+      const j=await r.json();
+      applyModeState(j);
+      await refreshInfo();
+    }
+
     async function refreshInfo(){
+      if(!engine.value){engineInfo.textContent='Nessun motore disponibile';return;}
       try{
         const r=await fetch('api/info?'+engineQuery());
-        if(!r.ok)throw new Error('HTTP '+r.status);
+        if(!r.ok)throw new Error((await r.text())||('HTTP '+r.status));
         const j=await r.json();
         engineInfo.textContent=(j.name||engine.value)+' · '+(j.version||'versione n/d');
       }catch(e){engineInfo.textContent='Motore non disponibile: '+e.message;}
@@ -113,6 +157,18 @@ INDEX_HTML = """<!doctype html>
       if(!r.ok)throw new Error((await r.text())||('HTTP '+r.status));
       return r;
     }
+
+    document.getElementById('applyMode').addEventListener('click',async()=>{
+      const button=document.getElementById('applyMode');
+      try{
+        button.disabled=true;status.textContent='Cambio modalità motori…';
+        const r=await fetch('api/mode?mode='+encodeURIComponent(mode.value),{method:'POST'});
+        if(!r.ok)throw new Error((await r.text())||('HTTP '+r.status));
+        const j=await r.json();applyModeState(j);await refreshInfo();
+        status.textContent='Modalità applicata: '+j.mode+'.';
+      }catch(e){status.textContent='Errore cambio modalità: '+e.message;await loadMode().catch(()=>{});}
+      finally{button.disabled=false;}
+    });
 
     engine.addEventListener('change',refreshInfo);
 
@@ -136,10 +192,7 @@ INDEX_HTML = """<!doctype html>
       }catch(e){status.textContent='Errore: '+e.message;}
     });
 
-    fetch('api/info').then(r=>r.ok?r.json():Promise.reject(new Error('HTTP '+r.status))).then(j=>{
-      if(j.defaultEngine && ['java','python'].includes(j.defaultEngine))engine.value=j.defaultEngine;
-      return refreshInfo();
-    }).catch(()=>refreshInfo());
+    loadMode().catch(e=>{status.textContent='Errore inizializzazione: '+e.message;});
   </script>
 </body>
 </html>
@@ -190,68 +243,143 @@ def wait_for_backend(engine: str, process: subprocess.Popen[bytes], timeout: flo
     raise RuntimeError(f"{engine} backend did not become ready: {last_error}")
 
 
-def start_backends() -> dict[str, subprocess.Popen[bytes]]:
-    java_env = os.environ.copy()
-    java_env.update(
-        {
-            "QUARKUS_HTTP_HOST": "127.0.0.1",
-            "QUARKUS_HTTP_PORT": str(JAVA_PORT),
-            "OOXML_CONTEXT_PATH": CONTEXT_PATH,
-            "OOXML_LOG_FILE": "/data/logs/ooxml-compat-normalize-quarkus.log",
-            "OOXML_OPEN_BROWSER": "false",
-        }
-    )
-    python_env = os.environ.copy()
-    python_env.update(
-        {
-            "OOXML_HTTP_HOST": "127.0.0.1",
-            "OOXML_HTTP_PORT": str(PYTHON_PORT),
-            "OOXML_CONTEXT_PATH": CONTEXT_PATH,
-            "OOXML_LOG_FILE": "/data/logs/ooxml-compat-normalize-python.log",
-            "OOXML_OPENXML_VALIDATOR": "/app/validator/OpenXmlSdkValidator",
-            "OOXML_SDK_VALIDATION": "required",
-        }
-    )
+def backend_environment(engine: str) -> dict[str, str]:
+    env = os.environ.copy()
+    if engine == "java":
+        env.update(
+            {
+                "QUARKUS_HTTP_HOST": "127.0.0.1",
+                "QUARKUS_HTTP_PORT": str(JAVA_PORT),
+                "OOXML_CONTEXT_PATH": CONTEXT_PATH,
+                "OOXML_LOG_FILE": "/data/logs/ooxml-compat-normalize-quarkus.log",
+                "OOXML_OPEN_BROWSER": "false",
+            }
+        )
+    else:
+        env.update(
+            {
+                "OOXML_HTTP_HOST": "127.0.0.1",
+                "OOXML_HTTP_PORT": str(PYTHON_PORT),
+                "OOXML_CONTEXT_PATH": CONTEXT_PATH,
+                "OOXML_LOG_FILE": "/data/logs/ooxml-compat-normalize-python.log",
+                "OOXML_OPENXML_VALIDATOR": "/app/validator/OpenXmlSdkValidator",
+                "OOXML_SDK_VALIDATION": "required",
+            }
+        )
+    return env
 
-    processes = {
-        "java": subprocess.Popen(
-            ["java", "-jar", "/app/java/ooxml-compat-normalize-quarkus.jar"],
-            env=java_env,
-        ),
-        "python": subprocess.Popen(
-            [sys.executable, "-m", "ooxml_compat_normalize.web_server"],
-            env=python_env,
-        ),
-    }
+
+def launch_backend(engine: str) -> subprocess.Popen[bytes]:
+    if engine == "java":
+        command = ["java", "-jar", "/app/java/ooxml-compat-normalize-quarkus.jar"]
+    else:
+        command = [sys.executable, "-m", "ooxml_compat_normalize.web_server"]
+    process = subprocess.Popen(command, env=backend_environment(engine))
     try:
-        for engine, process in processes.items():
-            wait_for_backend(engine, process)
+        wait_for_backend(engine, process)
     except Exception:
-        stop_backends(processes)
+        stop_process(process)
         raise
-    return processes
+    return process
 
 
-def stop_backends(processes: dict[str, subprocess.Popen[bytes]]) -> None:
-    for process in processes.values():
-        if process.poll() is None:
-            process.terminate()
-    deadline = time.monotonic() + 8
-    for process in processes.values():
-        remaining = max(0.0, deadline - time.monotonic())
-        try:
-            process.wait(timeout=remaining)
-        except subprocess.TimeoutExpired:
-            process.kill()
-    for process in processes.values():
+def stop_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is None:
+        process.terminate()
+    try:
+        process.wait(timeout=8)
+    except subprocess.TimeoutExpired:
+        process.kill()
         try:
             process.wait(timeout=2)
         except subprocess.TimeoutExpired:
             pass
 
 
+def desired_engines(mode: str) -> tuple[str, ...]:
+    if mode == "both":
+        return ENGINE_ORDER
+    return (mode,)
+
+
+class EngineManager:
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._processes: dict[str, subprocess.Popen[bytes]] = {}
+        self._mode = STARTUP_MODE
+
+    def mode(self) -> str:
+        with self._lock:
+            return self._mode
+
+    def enabled_engines(self) -> list[str]:
+        with self._lock:
+            return [engine for engine in ENGINE_ORDER if engine in self._processes]
+
+    def default_engine(self) -> str:
+        enabled = self.enabled_engines()
+        if DEFAULT_ENGINE in enabled:
+            return DEFAULT_ENGINE
+        if enabled:
+            return enabled[0]
+        return DEFAULT_ENGINE
+
+    def is_enabled(self, engine: str) -> bool:
+        with self._lock:
+            process = self._processes.get(engine)
+            return process is not None and process.poll() is None
+
+    def set_mode(self, mode: str) -> None:
+        mode = mode.strip().lower()
+        if mode not in ALLOWED_MODES:
+            raise ValueError("mode must be 'both', 'python' or 'java'")
+        wanted = desired_engines(mode)
+        with self._lock:
+            for engine in wanted:
+                process = self._processes.get(engine)
+                if process is None or process.poll() is not None:
+                    if process is not None:
+                        self._processes.pop(engine, None)
+                    LOG.info("Starting %s backend for mode=%s", engine, mode)
+                    self._processes[engine] = launch_backend(engine)
+
+            for engine in list(self._processes):
+                if engine not in wanted:
+                    process = self._processes.pop(engine)
+                    LOG.info("Stopping %s backend for mode=%s", engine, mode)
+                    stop_process(process)
+
+            self._mode = mode
+            LOG.info("Engine mode active: mode=%s enabled=%s", mode, ",".join(self.enabled_engines()))
+
+    def state(self) -> dict[str, object]:
+        return {
+            "mode": self.mode(),
+            "enabledEngines": self.enabled_engines(),
+            "defaultEngine": self.default_engine(),
+        }
+
+    def processes_snapshot(self) -> dict[str, subprocess.Popen[bytes]]:
+        with self._lock:
+            return dict(self._processes)
+
+    def stop_all(self) -> None:
+        with self._lock:
+            processes = list(self._processes.values())
+            self._processes.clear()
+        for process in processes:
+            stop_process(process)
+
+
+MANAGER = EngineManager()
+
+
+class EngineDisabledError(ValueError):
+    pass
+
+
 class CombinedHandler(BaseHTTPRequestHandler):
-    server_version = "OOXMLCompatNormalizeCombined/1"
+    server_version = "OOXMLCompatNormalizeCombined/2"
 
     def log_message(self, fmt: str, *args: object) -> None:
         LOG.info("HTTP %s - %s", self.address_string(), fmt % args)
@@ -280,9 +408,11 @@ class CombinedHandler(BaseHTTPRequestHandler):
     def selected_engine(self, parsed) -> str:
         query_engine = parse_qs(parsed.query).get("engine", [""])[0].strip().lower()
         header_engine = (self.headers.get("X-OOXML-Engine") or "").strip().lower()
-        engine = query_engine or header_engine or DEFAULT_ENGINE
+        engine = query_engine or header_engine or MANAGER.default_engine()
         if engine not in BACKENDS:
             raise ValueError("engine must be 'java' or 'python'")
+        if not MANAGER.is_enabled(engine):
+            raise EngineDisabledError(f"engine '{engine}' is disabled in mode '{MANAGER.mode()}'")
         return engine
 
     def read_body(self) -> bytes:
@@ -320,11 +450,13 @@ class CombinedHandler(BaseHTTPRequestHandler):
                     if value:
                         forwarded[key] = value
                 forwarded["X-OOXML-Selected-Engine"] = engine
+                forwarded["X-OOXML-Engine-Mode"] = MANAGER.mode()
                 self.send_bytes(response.status, payload, forwarded)
         except HTTPError as exc:
             payload = exc.read()
             forwarded = {"Content-Type": exc.headers.get("Content-Type", "text/plain; charset=utf-8")}
             forwarded["X-OOXML-Selected-Engine"] = engine
+            forwarded["X-OOXML-Engine-Mode"] = MANAGER.mode()
             self.send_bytes(exc.code, payload, forwarded)
         except URLError as exc:
             LOG.error("Backend unavailable: engine=%s target=%s error=%s", engine, target, exc)
@@ -339,7 +471,10 @@ class CombinedHandler(BaseHTTPRequestHandler):
             self.send_bytes(HTTPStatus.OK, INDEX_HTML.encode("utf-8"), {"Content-Type": "text/html; charset=utf-8"})
             return
         if parsed.path == API_BASE + "/health":
-            self.send_json({"status": "ok", "engine": "combined", "contextPath": CONTEXT_PATH})
+            self.send_json({"status": "ok", "engine": "combined", "contextPath": CONTEXT_PATH, **MANAGER.state()})
+            return
+        if parsed.path == API_BASE + "/mode":
+            self.send_json({"engine": "combined", "contextPath": CONTEXT_PATH, **MANAGER.state()})
             return
         if parsed.path == API_BASE + "/info":
             try:
@@ -348,18 +483,20 @@ class CombinedHandler(BaseHTTPRequestHandler):
                     engine = self.selected_engine(parsed)
                     self.proxy(engine, "GET", parsed)
                     return
-                infos = {engine: backend_info(engine) for engine in BACKENDS}
+                infos = {engine: backend_info(engine) for engine in MANAGER.enabled_engines()}
                 self.send_json(
                     {
                         "name": "ooxml-compat-normalize-combined",
                         "engine": "combined",
-                        "defaultEngine": DEFAULT_ENGINE,
                         "contextPath": CONTEXT_PATH,
+                        **MANAGER.state(),
                         "engines": infos,
                         "formats": ["docx", "xlsx", "pptx"],
                         "profiles": ["preserve-v1", "interop-transitional-v1", "portable-explicit-v1"],
                     }
                 )
+            except EngineDisabledError as exc:
+                self.send_text(str(exc), HTTPStatus.CONFLICT)
             except (ValueError, OSError, URLError, HTTPError) as exc:
                 LOG.exception("Combined info request failed")
                 self.send_text(str(exc), HTTPStatus.BAD_GATEWAY)
@@ -368,6 +505,20 @@ class CombinedHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == API_BASE + "/mode":
+            try:
+                mode = parse_qs(parsed.query).get("mode", [""])[0].strip().lower()
+                if not mode:
+                    raise ValueError("mode query parameter is required: both, python or java")
+                MANAGER.set_mode(mode)
+                self.send_json({"engine": "combined", "contextPath": CONTEXT_PATH, **MANAGER.state()})
+            except ValueError as exc:
+                self.send_text(str(exc), HTTPStatus.BAD_REQUEST)
+            except Exception as exc:
+                LOG.exception("Engine mode change failed")
+                self.send_text(str(exc), HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+
         if parsed.path not in {API_BASE + "/audit", API_BASE + "/normalize"}:
             self.send_text("Not found", HTTPStatus.NOT_FOUND)
             return
@@ -375,7 +526,8 @@ class CombinedHandler(BaseHTTPRequestHandler):
             engine = self.selected_engine(parsed)
             body = self.read_body()
             LOG.info(
-                "Proxy request: engine=%s endpoint=%s file=%s bytes=%d",
+                "Proxy request: mode=%s engine=%s endpoint=%s file=%s bytes=%d",
+                MANAGER.mode(),
                 engine,
                 parsed.path,
                 self.headers.get("X-Filename", ""),
@@ -384,6 +536,8 @@ class CombinedHandler(BaseHTTPRequestHandler):
             self.proxy(engine, "POST", parsed, body)
         except OverflowError as exc:
             self.send_text(str(exc), HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        except EngineDisabledError as exc:
+            self.send_text(str(exc), HTTPStatus.CONFLICT)
         except ValueError as exc:
             self.send_text(str(exc), HTTPStatus.BAD_REQUEST)
 
@@ -391,7 +545,7 @@ class CombinedHandler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.environ.get("OOXML_HTTP_HOST", "0.0.0.0")
     port = int(os.environ.get("OOXML_HTTP_PORT", "8080"))
-    processes = start_backends()
+    MANAGER.set_mode(STARTUP_MODE)
     server = ThreadingHTTPServer((host, port), CombinedHandler)
     stopping = threading.Event()
 
@@ -407,7 +561,7 @@ def main() -> None:
 
     def monitor_children() -> None:
         while not stopping.wait(1.0):
-            for engine, process in processes.items():
+            for engine, process in MANAGER.processes_snapshot().items():
                 if process.poll() is not None:
                     LOG.error("%s backend exited unexpectedly with code %s", engine, process.returncode)
                     stopping.set()
@@ -416,18 +570,20 @@ def main() -> None:
 
     threading.Thread(target=monitor_children, daemon=True).start()
     LOG.info(
-        "OOXML Compat Normalize combined gateway started on %s:%d%s/ defaultEngine=%s",
+        "OOXML Compat Normalize combined gateway started on %s:%d%s/ mode=%s defaultEngine=%s enabled=%s",
         host,
         port,
         CONTEXT_PATH,
-        DEFAULT_ENGINE,
+        MANAGER.mode(),
+        MANAGER.default_engine(),
+        ",".join(MANAGER.enabled_engines()),
     )
     try:
         server.serve_forever()
     finally:
         stopping.set()
         server.server_close()
-        stop_backends(processes)
+        MANAGER.stop_all()
         LOG.info("OOXML Compat Normalize combined gateway stopped")
 
 

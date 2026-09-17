@@ -56,9 +56,10 @@ jobs:
         run: |
           set -euo pipefail
           export OOXML_PORT=18083
+          export OOXML_CONTEXT_PATH=/ooxml-compat-normalize
           docker compose -f "$COMPOSE_FILE" up --build -d
 
-      - name: Verify UI, REST API, normalization, logs and non-root runtime
+      - name: Verify context-prefixed UI, REST API, normalization, logs and non-root runtime
         shell: bash
         env:
           COMPOSE_FILE: ${{ matrix.compose }}
@@ -69,6 +70,8 @@ jobs:
         run: |
           set -euo pipefail
           export OOXML_PORT=18083
+          export OOXML_CONTEXT_PATH=/ooxml-compat-normalize
+          BASE_URL="http://127.0.0.1:${OOXML_PORT}${OOXML_CONTEXT_PATH}"
 
           compose() {
             docker compose -f "$COMPOSE_FILE" "$@"
@@ -81,7 +84,7 @@ jobs:
 
           started=false
           for i in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:18083/api/info > /tmp/ooxml-docker-info.json; then
+            if curl -fsS "$BASE_URL/api/info" > /tmp/ooxml-docker-info.json; then
               started=true
               break
             fi
@@ -92,10 +95,17 @@ jobs:
             exit 1
           fi
 
-          curl -fsS http://127.0.0.1:18083/ > /tmp/ooxml-docker-home.html
+          curl -fsS "$BASE_URL/" > /tmp/ooxml-docker-home.html
           grep -q 'OOXML Compat Normalize' /tmp/ooxml-docker-home.html
           grep -q 'Normalizza e scarica' /tmp/ooxml-docker-home.html
+          grep -q '"contextPath"[[:space:]]*:[[:space:]]*"/ooxml-compat-normalize"' /tmp/ooxml-docker-info.json
           cat /tmp/ooxml-docker-info.json
+
+          # API routes must not be exposed directly at the host root.
+          if curl -fsS "http://127.0.0.1:${OOXML_PORT}/api/info" >/dev/null 2>&1; then
+            echo "Unexpected root-level /api/info route for $ENGINE" >&2
+            exit 1
+          fi
 
           python - <<'PY'
           from pathlib import Path
@@ -127,7 +137,7 @@ jobs:
             -H 'Content-Type: application/octet-stream' \
             -H 'X-Filename: ooxml-rest-smoke.docx' \
             --data-binary @/tmp/ooxml-rest-smoke.docx \
-            http://127.0.0.1:18083/api/audit \
+            "$BASE_URL/api/audit" \
             > /tmp/ooxml-docker-audit.json
           grep -qi 'docx' /tmp/ooxml-docker-audit.json
           cat /tmp/ooxml-docker-audit.json
@@ -137,7 +147,7 @@ jobs:
             -H 'Content-Type: application/octet-stream' \
             -H 'X-Filename: ooxml-rest-smoke.docx' \
             --data-binary @/tmp/ooxml-rest-smoke.docx \
-            'http://127.0.0.1:18083/api/normalize?profile=preserve-v1' \
+            "$BASE_URL/api/normalize?profile=preserve-v1" \
             -o /tmp/ooxml-rest-normalized.docx
 
           python - <<'PY'
@@ -175,7 +185,7 @@ jobs:
           compose restart "$SERVICE"
           restarted=false
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:18083/api/info >/dev/null; then
+            if curl -fsS "$BASE_URL/api/info" >/dev/null; then
               restarted=true
               break
             fi

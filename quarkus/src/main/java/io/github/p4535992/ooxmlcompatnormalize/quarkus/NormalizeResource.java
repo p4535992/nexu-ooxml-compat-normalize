@@ -13,6 +13,7 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
@@ -32,6 +33,9 @@ public class NormalizeResource {
             "portable-explicit-v1"
     );
 
+    @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/ooxml-compat-normalize")
+    String rootPath;
+
     @GET
     @Path("/info")
     @Produces(MediaType.APPLICATION_JSON)
@@ -39,6 +43,8 @@ public class NormalizeResource {
         return new InfoResponse(
                 "ooxml-compat-normalize-quarkus",
                 "0.4.0-rc.9",
+                "java",
+                normalizeContextPath(rootPath),
                 List.of("docx", "xlsx", "pptx"),
                 List.copyOf(PROFILES)
         );
@@ -141,6 +147,7 @@ public class NormalizeResource {
             );
             return Response.ok(normalized, MediaType.APPLICATION_OCTET_STREAM_TYPE)
                     .header("Content-Disposition", "attachment; filename=\"" + outputName + "\"")
+                    .header("X-OOXML-Engine", "java")
                     .header("X-OOXML-Kind", result.kind().name())
                     .header("X-OOXML-Changed-Parts", Integer.toString(result.changedParts().size()))
                     .build();
@@ -182,7 +189,28 @@ public class NormalizeResource {
         return dot < 0 ? filename : filename.substring(0, dot);
     }
 
-    public record InfoResponse(String name, String version, List<String> formats, List<String> profiles) {}
+    private static String normalizeContextPath(String value) {
+        if (value == null || value.isBlank() || "/".equals(value.trim())) {
+            return "/";
+        }
+        String normalized = value.trim();
+        if (!normalized.startsWith("/")) {
+            normalized = "/" + normalized;
+        }
+        while (normalized.endsWith("/") && normalized.length() > 1) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
+    public record InfoResponse(
+            String name,
+            String version,
+            String engine,
+            String contextPath,
+            List<String> formats,
+            List<String> profiles
+    ) {}
 
     public record AuditResponse(
             String filename,

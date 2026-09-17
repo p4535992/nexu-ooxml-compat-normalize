@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-@Path("/api")
+@Path("api")
 public class NormalizeResource {
 
     private static final Logger LOG = Logger.getLogger(NormalizeResource.class);
@@ -37,7 +37,7 @@ public class NormalizeResource {
     String rootPath;
 
     @GET
-    @Path("/info")
+    @Path("info")
     @Produces(MediaType.APPLICATION_JSON)
     public InfoResponse info() {
         return new InfoResponse(
@@ -51,7 +51,7 @@ public class NormalizeResource {
     }
 
     @POST
-    @Path("/audit")
+    @Path("audit")
     @Consumes(MediaType.APPLICATION_OCTET_STREAM)
     @Produces(MediaType.APPLICATION_JSON)
     public AuditResponse audit(byte[] body, @HeaderParam("X-Filename") String filename) throws IOException {
@@ -88,7 +88,7 @@ public class NormalizeResource {
     }
 
     @POST
-    @Path("/normalize")
+    @Path("normalize")
     @Consumes(MediaType.APPLICATION_OCTET_STREAM)
     @Produces(MediaType.APPLICATION_OCTET_STREAM)
     public Response normalize(

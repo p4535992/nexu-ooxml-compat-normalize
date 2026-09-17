@@ -13,9 +13,11 @@ class NormalizeResourceTest {
     private static final String CONTEXT = "/ooxml-compat-normalize";
 
     @Test
-    void infoEndpointIsAvailableUnderContextPath() {
+    void infoEndpointIsAvailableUnderConfiguredContextPath() {
+        // QuarkusTest configures RestAssured with quarkus.http.root-path already,
+        // so request paths here are relative to the configured application context.
         given()
-                .when().get(CONTEXT + "/api/info")
+                .when().get("/api/info")
                 .then()
                 .statusCode(200)
                 .body("name", equalTo("ooxml-compat-normalize-quarkus"))
@@ -25,9 +27,9 @@ class NormalizeResourceTest {
     }
 
     @Test
-    void homePageIsAvailableUnderContextPath() {
+    void homePageIsAvailableUnderConfiguredContextPath() {
         given()
-                .when().get(CONTEXT + "/")
+                .when().get("/")
                 .then()
                 .statusCode(200)
                 .contentType("text/html")

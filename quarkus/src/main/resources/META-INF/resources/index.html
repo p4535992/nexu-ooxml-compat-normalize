@@ -40,12 +40,12 @@
       return r;
     }
     document.getElementById('audit').addEventListener('click',async()=>{
-      try{const f=selected();status.textContent='Analisi…';const r=await post('/api/audit',f);const j=await r.json();status.textContent=JSON.stringify(j,null,2);}catch(e){status.textContent='Errore: '+e.message;}
+      try{const f=selected();status.textContent='Analisi…';const r=await post('api/audit',f);const j=await r.json();status.textContent=JSON.stringify(j,null,2);}catch(e){status.textContent='Errore: '+e.message;}
     });
     document.getElementById('normalize').addEventListener('click',async()=>{
       try{
         const f=selected();status.textContent='Normalizzazione…';
-        const r=await post('/api/normalize?profile='+encodeURIComponent(profile.value),f);
+        const r=await post('api/normalize?profile='+encodeURIComponent(profile.value),f);
         const blob=await r.blob();
         const cd=r.headers.get('Content-Disposition')||'';
         const m=/filename="([^"]+)"/.exec(cd);const name=m?m[1]:'normalized-'+f.name;

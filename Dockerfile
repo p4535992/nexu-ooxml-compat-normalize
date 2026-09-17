@@ -32,6 +32,7 @@ RUN mkdir -p /data/logs \
 # on host loopback only by default.
 ENV QUARKUS_HTTP_HOST=0.0.0.0 \
     QUARKUS_HTTP_PORT=8080 \
+    OOXML_CONTEXT_PATH=/ooxml-compat-normalize \
     OOXML_LOG_FILE=/data/logs/ooxml-compat-normalize-quarkus.log \
     OOXML_OPEN_BROWSER=false
 

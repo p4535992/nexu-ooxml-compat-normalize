@@ -24,6 +24,9 @@ public class BrowserLauncher {
     @ConfigProperty(name = "quarkus.http.port", defaultValue = "8080")
     int port;
 
+    @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/ooxml-compat-normalize")
+    String rootPath;
+
     void onStart(@Observes StartupEvent event) {
         // GitHub runners and other CI environments must never try to launch a desktop browser.
         if (!openBrowser || System.getenv("CI") != null) {
@@ -36,7 +39,8 @@ public class BrowserLauncher {
     }
 
     private void openWhenReady() {
-        String base = "http://127.0.0.1:" + port;
+        String context = normalizeContextPath(rootPath);
+        String base = "http://127.0.0.1:" + port + context;
         String info = base + "/api/info";
 
         try {
@@ -57,6 +61,20 @@ public class BrowserLauncher {
         } catch (Exception ex) {
             LOG.warnf(ex, "Could not open local UI automatically: %s/", base);
         }
+    }
+
+    private static String normalizeContextPath(String value) {
+        if (value == null || value.isBlank() || "/".equals(value.trim())) {
+            return "";
+        }
+        String normalized = value.trim();
+        if (!normalized.startsWith("/")) {
+            normalized = "/" + normalized;
+        }
+        while (normalized.endsWith("/") && normalized.length() > 1) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private static boolean isReady(String url) {

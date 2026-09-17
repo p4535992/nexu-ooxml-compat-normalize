@@ -29,13 +29,16 @@ cat > "$JAVA_DIR/QUICKSTART.md" <<'EOF'
 docker compose up --build -d
 ```
 
-Open `http://127.0.0.1:8080/`.
+Open `http://127.0.0.1:8080/ooxml-compat-normalize/`.
 
 REST API:
 
-- `GET /api/info`
-- `POST /api/audit`
-- `POST /api/normalize?profile=interop-transitional-v1`
+- `GET /ooxml-compat-normalize/api/info`
+- `POST /ooxml-compat-normalize/api/audit`
+- `POST /ooxml-compat-normalize/api/normalize?profile=interop-transitional-v1`
+
+The default context path is `/ooxml-compat-normalize`. Override it with
+`OOXML_CONTEXT_PATH=/your-prefix` when starting Compose.
 
 Stop while preserving the log volume with `docker compose down`.
 Use `docker compose down -v` only when you also want to delete the persistent logs.
@@ -62,13 +65,16 @@ cat > "$PYTHON_DIR/QUICKSTART.md" <<'EOF'
 docker compose up --build -d
 ```
 
-Open `http://127.0.0.1:8080/`.
+Open `http://127.0.0.1:8080/ooxml-compat-normalize/`.
 
 REST API:
 
-- `GET /api/info`
-- `POST /api/audit`
-- `POST /api/normalize?profile=interop-transitional-v1`
+- `GET /ooxml-compat-normalize/api/info`
+- `POST /ooxml-compat-normalize/api/audit`
+- `POST /ooxml-compat-normalize/api/normalize?profile=interop-transitional-v1`
+
+The default context path is `/ooxml-compat-normalize`. Override it with
+`OOXML_CONTEXT_PATH=/your-prefix` when starting Compose.
 
 The image contains the Python normalization engine and builds a self-contained
 Microsoft Open XML SDK validator during the Docker build.

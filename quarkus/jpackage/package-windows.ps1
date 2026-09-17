@@ -105,8 +105,9 @@ $OpenUi = Join-Path $AppImage "open-ui.cmd"
 @'
 @echo off
 setlocal
-set "OOXML_URL=http://127.0.0.1:8080/"
-set "OOXML_INFO=http://127.0.0.1:8080/api/info"
+if not defined OOXML_CONTEXT_PATH set "OOXML_CONTEXT_PATH=/ooxml-compat-normalize"
+set "OOXML_URL=http://127.0.0.1:8080%OOXML_CONTEXT_PATH%/"
+set "OOXML_INFO=http://127.0.0.1:8080%OOXML_CONTEXT_PATH%/api/info"
 
 rem If the local service is already running, just open its UI.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri '%OOXML_INFO%' -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>&1
@@ -116,7 +117,7 @@ if not errorlevel 1 (
 )
 
 rem Otherwise start the packaged Quarkus launcher. The EXE waits for readiness
-rem and opens http://127.0.0.1:8080/ itself, avoiding a duplicate browser tab.
+rem and opens the context-path UI itself, avoiding a duplicate browser tab.
 if not exist "%~dp0OOXML-Compat-Normalize-Quarkus.exe" (
     echo OOXML-Compat-Normalize-Quarkus.exe non trovato nella cartella corrente.
     exit /b 1

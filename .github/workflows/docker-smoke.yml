@@ -8,9 +8,11 @@ on:
     paths:
       - 'Dockerfile'
       - 'Dockerfile.python'
+      - 'Dockerfile.combined'
       - 'docker-compose.yml'
       - 'docker-compose.java.yml'
       - 'docker-compose.python.yml'
+      - 'docker-compose.combined.yml'
       - '.dockerignore'
       - 'docker/**'
       - 'java/**'
@@ -101,7 +103,6 @@ jobs:
           grep -q '"contextPath"[[:space:]]*:[[:space:]]*"/ooxml-compat-normalize"' /tmp/ooxml-docker-info.json
           cat /tmp/ooxml-docker-info.json
 
-          # API routes must not be exposed directly at the host root.
           if curl -fsS "http://127.0.0.1:${OOXML_PORT}/api/info" >/dev/null 2>&1; then
             echo "Unexpected root-level /api/info route for $ENGINE" >&2
             exit 1
@@ -194,6 +195,167 @@ jobs:
           test "$restarted" = true
           compose exec -T "$SERVICE" sh -c "test -s '$LOG_FILE'"
           test "$(compose exec -T "$SERVICE" id -u)" != '0'
+
+          trap - EXIT
+          cleanup
+
+  smoke_combined:
+    name: Docker combined Java + Python
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build and start combined container
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OOXML_PORT=18084
+          export OOXML_CONTEXT_PATH=/ooxml-compat-normalize
+          export OOXML_DEFAULT_ENGINE=python
+          docker compose -f docker-compose.combined.yml up --build -d
+
+      - name: Verify selectable Java and Python engines in one container
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OOXML_PORT=18084
+          export OOXML_CONTEXT_PATH=/ooxml-compat-normalize
+          export OOXML_DEFAULT_ENGINE=python
+          BASE_URL="http://127.0.0.1:${OOXML_PORT}${OOXML_CONTEXT_PATH}"
+
+          compose() {
+            docker compose -f docker-compose.combined.yml "$@"
+          }
+          cleanup() {
+            compose logs normalizer-combined || true
+            compose down -v || true
+          }
+          trap cleanup EXIT
+
+          started=false
+          for i in $(seq 1 120); do
+            if curl -fsS "$BASE_URL/api/info" > /tmp/ooxml-combined-info.json; then
+              started=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$started" != true ]]; then
+            echo 'Combined Docker service did not become ready' >&2
+            exit 1
+          fi
+
+          grep -q '"engine"[[:space:]]*:[[:space:]]*"combined"' /tmp/ooxml-combined-info.json
+          grep -q '"defaultEngine"[[:space:]]*:[[:space:]]*"python"' /tmp/ooxml-combined-info.json
+          grep -q '"contextPath"[[:space:]]*:[[:space:]]*"/ooxml-compat-normalize"' /tmp/ooxml-combined-info.json
+          grep -q '"java"' /tmp/ooxml-combined-info.json
+          grep -q '"python"' /tmp/ooxml-combined-info.json
+
+          curl -fsS "$BASE_URL/" > /tmp/ooxml-combined-home.html
+          grep -q 'OOXML Compat Normalize' /tmp/ooxml-combined-home.html
+          grep -q 'id="engine"' /tmp/ooxml-combined-home.html
+          grep -q 'Java / Quarkus' /tmp/ooxml-combined-home.html
+          grep -q '>Python<' /tmp/ooxml-combined-home.html
+          grep -q 'Normalizza e scarica' /tmp/ooxml-combined-home.html
+
+          if curl -fsS "http://127.0.0.1:${OOXML_PORT}/api/info" >/dev/null 2>&1; then
+            echo 'Unexpected root-level /api/info route for combined stack' >&2
+            exit 1
+          fi
+
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+
+          target = Path('/tmp/ooxml-combined-smoke.docx')
+          content_types = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+            <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+            <Default Extension="xml" ContentType="application/xml"/>
+            <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+          </Types>'''
+          root_rels = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+          </Relationships>'''
+          document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:body><w:p><w:r><w:t>OOXML combined engine smoke test</w:t></w:r></w:p><w:sectPr/></w:body>
+          </w:document>'''
+          with ZipFile(target, 'w', ZIP_DEFLATED) as zf:
+              zf.writestr('[Content_Types].xml', content_types)
+              zf.writestr('_rels/.rels', root_rels)
+              zf.writestr('word/document.xml', document)
+          PY
+
+          for engine in python java; do
+            curl -fsS "$BASE_URL/api/info?engine=$engine" > "/tmp/ooxml-$engine-info.json"
+            grep -q "\"engine\"[[:space:]]*:[[:space:]]*\"$engine\"" "/tmp/ooxml-$engine-info.json"
+
+            curl -fsS \
+              -X POST \
+              -H 'Content-Type: application/octet-stream' \
+              -H 'X-Filename: ooxml-combined-smoke.docx' \
+              -H "X-OOXML-Engine: $engine" \
+              --data-binary @/tmp/ooxml-combined-smoke.docx \
+              "$BASE_URL/api/audit?engine=$engine" \
+              > "/tmp/ooxml-$engine-audit.json"
+            grep -qi 'docx' "/tmp/ooxml-$engine-audit.json"
+
+            curl -fsS \
+              -D "/tmp/ooxml-$engine-headers.txt" \
+              -X POST \
+              -H 'Content-Type: application/octet-stream' \
+              -H 'X-Filename: ooxml-combined-smoke.docx' \
+              -H "X-OOXML-Engine: $engine" \
+              --data-binary @/tmp/ooxml-combined-smoke.docx \
+              "$BASE_URL/api/normalize?engine=$engine&profile=preserve-v1" \
+              -o "/tmp/ooxml-$engine-normalized.docx"
+            grep -qi "^X-OOXML-Selected-Engine: $engine" "/tmp/ooxml-$engine-headers.txt"
+            grep -qi "^X-OOXML-Engine: $engine" "/tmp/ooxml-$engine-headers.txt"
+
+            ENGINE="$engine" python - <<'PY'
+          import os
+          from zipfile import ZipFile
+          engine = os.environ['ENGINE']
+          with ZipFile(f'/tmp/ooxml-{engine}-normalized.docx') as zf:
+              assert '[Content_Types].xml' in zf.namelist()
+              assert 'word/document.xml' in zf.namelist()
+              assert zf.testzip() is None
+          PY
+          done
+
+          compose exec -T normalizer-combined sh -c 'test -w /data/logs'
+          compose exec -T normalizer-combined test -s /data/logs/ooxml-compat-normalize-gateway.log
+          compose exec -T normalizer-combined test -s /data/logs/ooxml-compat-normalize-python.log
+          compose exec -T normalizer-combined test -s /data/logs/ooxml-compat-normalize-quarkus.log
+          compose exec -T normalizer-combined grep -q 'combined gateway started' /data/logs/ooxml-compat-normalize-gateway.log
+          compose exec -T normalizer-combined grep -q 'Python web service started' /data/logs/ooxml-compat-normalize-python.log
+          compose exec -T normalizer-combined grep -q 'Quarkus local service started' /data/logs/ooxml-compat-normalize-quarkus.log
+
+          test "$(compose exec -T normalizer-combined id -u)" != '0'
+          compose exec -T normalizer-combined test -r /app/licenses/LICENSE
+          compose exec -T normalizer-combined test -r /app/licenses/THIRD_PARTY_NOTICES.md
+          compose exec -T normalizer-combined test -r /app/licenses/THIRD_PARTY_LICENSES.md
+          compose exec -T normalizer-combined test -x /app/validator/OpenXmlSdkValidator
+          compose exec -T normalizer-combined test -r /app/licenses/dotnet/LICENSE.txt
+          compose exec -T normalizer-combined test -r /app/licenses/dotnet/ThirdPartyNotices.txt
+          compose exec -T normalizer-combined java -version
+          compose exec -T normalizer-combined test -r /usr/share/doc/openjdk-17-jre-headless/copyright
+
+          compose restart normalizer-combined
+          restarted=false
+          for i in $(seq 1 90); do
+            if curl -fsS "$BASE_URL/api/info?engine=python" >/dev/null \
+              && curl -fsS "$BASE_URL/api/info?engine=java" >/dev/null; then
+              restarted=true
+              break
+            fi
+            sleep 1
+          done
+          test "$restarted" = true
 
           trap - EXIT
           cleanup

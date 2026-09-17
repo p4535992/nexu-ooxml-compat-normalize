@@ -4,68 +4,90 @@ The repository exposes **three Docker stacks** with the same context-prefixed we
 
 - `docker-compose.java.yml` — Java core through Quarkus only;
 - `docker-compose.python.yml` — Python normalization engine only, with the self-contained Microsoft Open XML SDK validator bundled in the image;
-- `docker-compose.combined.yml` — one container that contains **both Java/Quarkus and Python**, with a small gateway/UI that lets the user select the engine per operation.
+- `docker-compose.combined.yml` — one container containing **both Java/Quarkus and Python**, fronted by a small gateway/UI.
 
-All listen on host loopback port **8080 by default** and expose the UI under the shared context path:
+All stacks publish host loopback port **8080 by default** and expose the UI at:
 
 ```text
 http://127.0.0.1:8080/ooxml-compat-normalize/
 ```
 
-The default context path is:
-
-```text
-/ooxml-compat-normalize
-```
-
-Override it for any stack with `OOXML_CONTEXT_PATH`, for example `OOXML_CONTEXT_PATH=/office-normalizer`.
-
-Only one stack can own `127.0.0.1:8080` at a time. To run multiple stacks simultaneously, assign a different `OOXML_PORT` to each additional stack.
+The default context path is `/ooxml-compat-normalize` and can be overridden with `OOXML_CONTEXT_PATH`.
 
 ## Combined Java + Python stack
 
-Start the single container containing both engines:
+Start:
 
 ```bash
 docker compose -f docker-compose.combined.yml up --build -d
 ```
 
-Open:
+The combined container supports three runtime modes:
 
 ```text
-http://127.0.0.1:8080/ooxml-compat-normalize/
+both    Python + Java enabled (default)
+python  only Python enabled
+java    only Java / Quarkus enabled
 ```
 
-The page exposes an **Engine** selector with:
+The startup mode can be selected with:
+
+```bash
+OOXML_ENGINE_MODE=python docker compose -f docker-compose.combined.yml up --build -d
+OOXML_ENGINE_MODE=java docker compose -f docker-compose.combined.yml up --build -d
+```
+
+`OOXML_ENGINE_MODE=both` is the default. `OOXML_DEFAULT_ENGINE=python|java` controls which engine is selected by default when both engines are enabled.
+
+### Change mode from the HTML page
+
+The combined web page contains:
+
+- a **Modalità** selector: `Python + Java`, `Solo Python`, `Solo Java / Quarkus`;
+- an **Engine** selector used for the individual audit/normalization operation.
+
+Changing the mode is a real runtime operation. For example, switching from `both` to `python` stops the Java backend process; switching to `java` stops the Python backend. Returning to `both` starts the missing backend again.
+
+No additional host ports are exposed. The gateway alone listens on the published port `8080`; Java and Python use separate loopback-only ports inside the same container.
+
+### Change mode through REST
+
+Current mode:
 
 ```text
-Python
-Java / Quarkus
+GET /ooxml-compat-normalize/api/mode
 ```
 
-The selected engine is used for both **Analizza** and **Normalizza e scarica**. No extra host ports are exposed: the gateway is the only process listening on the published container port, while Java and Python listen on separate loopback-only ports inside the same container.
+Set a mode:
 
-The default engine is Python and can be changed at startup:
+```text
+POST /ooxml-compat-normalize/api/mode?mode=both
+POST /ooxml-compat-normalize/api/mode?mode=python
+POST /ooxml-compat-normalize/api/mode?mode=java
+```
+
+Example:
 
 ```bash
-OOXML_DEFAULT_ENGINE=java docker compose -f docker-compose.combined.yml up --build -d
+curl -f -X POST \
+  'http://127.0.0.1:8080/ooxml-compat-normalize/api/mode?mode=python'
 ```
 
-Stop while preserving logs:
+The response reports:
 
-```bash
-docker compose -f docker-compose.combined.yml down
+```json
+{
+  "mode": "python",
+  "enabledEngines": ["python"],
+  "defaultEngine": "python"
+}
 ```
 
-Delete the persistent log volume as well:
+Requests for a disabled engine return HTTP `409 Conflict`.
 
-```bash
-docker compose -f docker-compose.combined.yml down -v
-```
+### Select an engine for an operation
 
-### Selecting the engine through REST
-
-For the combined stack, pass the engine as a query parameter:
+When the mode is `both`, select the engine with the query parameter:
 
 ```text
 GET  /ooxml-compat-normalize/api/info?engine=java
@@ -76,78 +98,115 @@ POST /ooxml-compat-normalize/api/normalize?engine=java&profile=interop-transitio
 POST /ooxml-compat-normalize/api/normalize?engine=python&profile=interop-transitional-v1
 ```
 
-`X-OOXML-Engine: java` or `X-OOXML-Engine: python` is also accepted for POST requests. The query parameter takes precedence when both are present. If neither is supplied, `OOXML_DEFAULT_ENGINE` is used.
+For POST requests, `X-OOXML-Engine: java|python` is also accepted. The query parameter takes precedence. If no engine is supplied, the current effective default engine is used.
 
-`GET /ooxml-compat-normalize/api/info` without an engine returns combined metadata plus information reported by both embedded engines.
-
-Normalization responses expose:
+Normalization responses include:
 
 ```text
 X-OOXML-Selected-Engine: java|python
+X-OOXML-Engine-Mode: both|python|java
 X-OOXML-Engine: java|python
 ```
 
-so a client can verify which normalizer produced the file.
-
-## Java / Quarkus stack
-
-Start:
+## Java-only stack
 
 ```bash
 docker compose -f docker-compose.java.yml up --build -d
 ```
 
-Open:
+This container runs Quarkus and the Java normalizer only; it does not invoke Python.
 
-```text
-http://127.0.0.1:8080/ooxml-compat-normalize/
-```
-
-Stop while preserving logs:
-
-```bash
-docker compose -f docker-compose.java.yml down
-```
-
-Delete the persistent log volume as well:
-
-```bash
-docker compose -f docker-compose.java.yml down -v
-```
-
-The Java container runs the Quarkus service and reuses the Java normalizer core; it does not invoke Python.
-
-## Python stack
-
-Start:
+## Python-only stack
 
 ```bash
 docker compose -f docker-compose.python.yml up --build -d
 ```
 
-Open:
+This container runs the Python engine plus the self-contained Microsoft Open XML SDK validator; it does not invoke Java normalizer code.
+
+## Shared REST API
+
+The Java-only and Python-only stacks expose:
 
 ```text
-http://127.0.0.1:8080/ooxml-compat-normalize/
+GET  /ooxml-compat-normalize/api/info
+POST /ooxml-compat-normalize/api/audit
+POST /ooxml-compat-normalize/api/normalize?profile=interop-transitional-v1
 ```
 
-Stop while preserving logs:
+The combined stack exposes the same operations plus `/api/mode` and optional `engine=java|python` routing.
+
+For audit/normalization:
+
+- body: raw DOCX/XLSX/PPTX bytes (`application/octet-stream`);
+- required header: `X-Filename` with the original filename and extension;
+- audit returns JSON;
+- normalize returns the normalized OOXML file.
+
+Example:
 
 ```bash
-docker compose -f docker-compose.python.yml down
+curl -f \
+  -X POST \
+  -H 'Content-Type: application/octet-stream' \
+  -H 'X-Filename: document.docx' \
+  --data-binary @document.docx \
+  'http://127.0.0.1:8080/ooxml-compat-normalize/api/normalize?engine=python&profile=interop-transitional-v1' \
+  -o document-normalized.docx
 ```
 
-Delete the persistent log volume as well:
+Supported profiles:
+
+```text
+preserve-v1
+interop-transitional-v1
+portable-explicit-v1
+```
+
+## Operator-friendly bundle scripts
+
+Every downloadable Docker Compose ZIP/TAR.GZ contains these executable helper scripts at the top level of its single root directory:
+
+```text
+start_all.sh
+down_all.sh
+```
+
+They deliberately work relative to their own directory, so an operator does not need to remember the Compose command or change directory manually.
+
+Start/build in detached mode:
 
 ```bash
-docker compose -f docker-compose.python.yml down -v
+./start_all.sh
 ```
 
-The Python image runs the same Python normalization engine used by the CLI/desktop application. The image also builds and bundles the self-contained Open XML SDK validator, and Docker configures SDK validation as `required`.
+This executes the equivalent of:
 
-## Run separate Java and Python stacks at the same time
+```bash
+docker compose up --build -d
+```
 
-For example, keep Java on port 8080 and run Python on port 8081:
+and prints the expected web URL plus `docker compose ps`.
+
+Stop the stack:
+
+```bash
+./down_all.sh
+```
+
+This executes:
+
+```bash
+docker compose down
+```
+
+It intentionally does **not** use `-v`, so persistent diagnostic log volumes are preserved.
+
+Both scripts check that Docker and the `docker compose` plugin are available and print a clear error otherwise.
+
+## Run separate stacks simultaneously
+
+Only one stack can own `127.0.0.1:8080` at a time. Example:
 
 ```bash
 docker compose -f docker-compose.java.yml up --build -d
@@ -161,142 +220,37 @@ Java:   http://127.0.0.1:8080/ooxml-compat-normalize/
 Python: http://127.0.0.1:8081/ooxml-compat-normalize/
 ```
 
-Use the combined stack instead when one exposed service with a per-operation engine selector is more convenient.
+## Port, context path and bind address
 
-## Shared REST API
-
-The Java-only and Python-only implementations expose the same paths under the context prefix:
-
-```text
-GET  /ooxml-compat-normalize/api/info
-POST /ooxml-compat-normalize/api/audit
-POST /ooxml-compat-normalize/api/normalize?profile=interop-transitional-v1
-```
-
-The combined stack exposes those same routes and adds the optional `engine=java|python` selector described above.
-
-`GET /ooxml-compat-normalize/api/info` also reports the active `contextPath`, so clients do not need to infer it.
-
-Supported profiles:
-
-```text
-preserve-v1
-interop-transitional-v1
-portable-explicit-v1
-```
-
-For the audit and normalize endpoints:
-
-- request body: raw DOCX/XLSX/PPTX bytes (`application/octet-stream`);
-- required header: `X-Filename` containing the original filename including extension;
-- `.../api/audit` returns JSON;
-- `.../api/normalize` returns the normalized OOXML file as `application/octet-stream` with `Content-Disposition`.
-
-### curl
-
-Audit with a dedicated Java/Python stack:
+Alternative port:
 
 ```bash
-curl -f \
-  -X POST \
-  -H "Content-Type: application/octet-stream" \
-  -H "X-Filename: document.docx" \
-  --data-binary @document.docx \
-  http://127.0.0.1:8080/ooxml-compat-normalize/api/audit
+OOXML_PORT=18080 docker compose -f docker-compose.combined.yml up --build -d
 ```
 
-Audit with the combined stack and Java selected:
+Alternative context:
 
 ```bash
-curl -f \
-  -X POST \
-  -H "Content-Type: application/octet-stream" \
-  -H "X-Filename: document.docx" \
-  --data-binary @document.docx \
-  "http://127.0.0.1:8080/ooxml-compat-normalize/api/audit?engine=java"
+OOXML_CONTEXT_PATH=/office-normalizer docker compose -f docker-compose.combined.yml up --build -d
 ```
 
-Normalize with the combined stack and Python selected:
-
-```bash
-curl -f \
-  -X POST \
-  -H "Content-Type: application/octet-stream" \
-  -H "X-Filename: document.docx" \
-  --data-binary @document.docx \
-  "http://127.0.0.1:8080/ooxml-compat-normalize/api/normalize?engine=python&profile=interop-transitional-v1" \
-  -o document-normalized.docx
-```
-
-### Python client code
-
-No third-party client library is required:
-
-```python
-from pathlib import Path
-from urllib.request import Request, urlopen
-
-src = Path("document.docx")
-request = Request(
-    "http://127.0.0.1:8080/ooxml-compat-normalize/api/normalize?profile=interop-transitional-v1",
-    data=src.read_bytes(),
-    method="POST",
-    headers={
-        "Content-Type": "application/octet-stream",
-        "X-Filename": src.name,
-    },
-)
-with urlopen(request) as response:
-    Path("document-normalized.docx").write_bytes(response.read())
-```
-
-The same client code can call either dedicated engine. For the combined stack, add `engine=java` or `engine=python` to the query string.
-
-### Java client code
-
-Java 11+ can use `java.net.http.HttpClient`:
-
-```java
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-Path input = Path.of("document.docx");
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("http://127.0.0.1:8080/ooxml-compat-normalize/api/normalize?profile=interop-transitional-v1"))
-    .header("Content-Type", "application/octet-stream")
-    .header("X-Filename", input.getFileName().toString())
-    .POST(HttpRequest.BodyPublishers.ofByteArray(Files.readAllBytes(input)))
-    .build();
-
-HttpResponse<byte[]> response = HttpClient.newHttpClient().send(
-    request,
-    HttpResponse.BodyHandlers.ofByteArray()
-);
-if (response.statusCode() != 200) {
-    throw new IllegalStateException("HTTP " + response.statusCode());
-}
-Files.write(Path.of("document-normalized.docx"), response.body());
-```
+The default host binding is loopback-only. Set `OOXML_BIND_ADDRESS=0.0.0.0` only when intentional network exposure is required and properly protected.
 
 ## Logs
 
-The Java stack uses the named volume `ooxml-java-logs` and writes:
+Java-only:
 
 ```text
 /data/logs/ooxml-compat-normalize-quarkus.log
 ```
 
-The Python stack uses the named volume `ooxml-python-logs` and writes:
+Python-only:
 
 ```text
 /data/logs/ooxml-compat-normalize-python.log
 ```
 
-The combined stack uses `ooxml-combined-logs` and writes all three diagnostic logs:
+Combined:
 
 ```text
 /data/logs/ooxml-compat-normalize-gateway.log
@@ -304,29 +258,11 @@ The combined stack uses `ooxml-combined-logs` and writes all three diagnostic lo
 /data/logs/ooxml-compat-normalize-python.log
 ```
 
-Normal `docker compose down` preserves each named volume. `down -v` deliberately deletes it.
-
-## Change host port, context path or bind address
-
-All compose files accept the same base variables. To use another local port:
-
-```bash
-OOXML_PORT=18080 docker compose -f docker-compose.combined.yml up --build -d
-```
-
-To use a different application context path:
-
-```bash
-OOXML_CONTEXT_PATH=/office-normalizer docker compose -f docker-compose.combined.yml up --build -d
-```
-
-The corresponding UI becomes `http://127.0.0.1:8080/office-normalizer/` and the API begins at `/office-normalizer/api/`.
-
-The default host binding is deliberately loopback-only. Set `OOXML_BIND_ADDRESS=0.0.0.0` only when intentional network exposure is required and properly protected.
+A normal `docker compose down` preserves the named log volume. `docker compose down -v` deliberately removes it.
 
 ## Downloadable Docker bundles
 
-The project keeps the established Java and Python Docker Compose ZIP names available after adding the combined container, and adds **TAR.GZ alternatives** for all three variants:
+Release packaging keeps the established Java/Python ZIP names and provides equivalent TAR.GZ files plus the combined variant:
 
 ```text
 OOXML-Compat-Normalize-java-docker-compose.zip
@@ -341,45 +277,39 @@ OOXML-Compat-Normalize-combined-docker-compose.tar.gz
 SHA256SUMS-docker.txt
 ```
 
-Each archive has exactly one top-level directory matching the archive name without `.zip` or `.tar.gz`. Inside that directory the selected compose file is named simply:
+Every archive has exactly one first-level directory matching its filename without `.zip` or `.tar.gz`. That directory contains:
 
 ```text
 docker-compose.yml
+start_all.sh
+down_all.sh
+...
 ```
 
-so after extraction the usual command is enough:
+plus all source files required to build that variant without cloning the repository separately.
 
-```bash
-docker compose up --build -d
-```
-
-The bundles include the source files needed by their corresponding Docker build; they do not require cloning the repository separately.
-
-`.github/workflows/docker-bundles.yml` creates and verifies these archives on relevant `main` changes. Permanent downloads are attached directly to each GitHub Release, avoiding dependency on the GitHub Actions temporary-artifact quota. A manual workflow run can also attach them to a specific existing release tag.
+`.github/workflows/docker-bundles.yml` validates all six archives, the root directory name, `docker-compose.yml`, shell syntax and executable mode of both helper scripts. Permanent downloads are attached directly to GitHub Releases rather than relying on temporary Actions artifact storage.
 
 ## Container security model
 
-All three stacks:
+All stacks:
 
-- run the exposed application/gateway process as numeric user `10001`, not root;
+- run the exposed application/gateway as numeric user `10001`, not root;
 - enable `no-new-privileges`;
 - bind the published host port to `127.0.0.1` by default;
 - persist only diagnostic logs in a named Docker volume;
-- process uploaded OOXML through temporary files and do not intentionally persist document contents in the log volume.
+- process uploaded OOXML with temporary files and do not intentionally persist document contents in the log volume.
 
-The dedicated Java image preserves the Temurin/OpenJDK `legal/` material supplied by its base image. The Python image retains the project notices and copies the .NET SDK/runtime license and third-party notice used to build its self-contained Open XML SDK validator under `/app/licenses/dotnet/`.
-
-The combined image includes Debian OpenJDK 17 plus its package copyright notice, and the same self-contained Open XML SDK validator/license material used by the Python image.
+The Java image preserves the runtime legal material supplied by its OpenJDK base. The Python image retains the project notices plus the .NET/Open XML SDK validator license material. The combined image includes both Java runtime legal material and the .NET validator license/third-party notices.
 
 ## CI coverage
 
-`.github/workflows/docker-smoke.yml` exercises all three deployment modes. The dedicated Java/Python matrix verifies the shared API contract independently. The combined job additionally verifies that **the same running container** can:
+`.github/workflows/docker-smoke.yml` tests Java-only, Python-only and combined normalization. The combined test audits and normalizes a DOCX with both engines.
 
-- expose the engine selector in the HTML page;
-- report both embedded engines;
-- audit and normalize a DOCX with `engine=python`;
-- audit and normalize the same DOCX with `engine=java`;
-- return the selected engine in response headers;
-- keep REST routes under the configured context path;
-- preserve separate gateway, Java and Python diagnostic logs;
-- run as a non-root user and restart with both engines available.
+`.github/workflows/docker-combined-mode-smoke.yml` additionally verifies the runtime mode controller:
+
+```text
+both -> python -> java -> both
+```
+
+and checks that the disabled backend process is actually stopped, disabled-engine REST calls return `409`, and both engines are restored after returning to `both`.

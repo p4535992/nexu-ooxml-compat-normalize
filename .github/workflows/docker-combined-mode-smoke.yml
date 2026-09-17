@@ -1,0 +1,132 @@
+name: Docker combined engine modes
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Dockerfile.combined'
+      - 'docker-compose.combined.yml'
+      - 'docker/combined_gateway.py'
+      - '.github/workflows/docker-combined-mode-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  modes:
+    name: Combined both python java modes
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build and start combined container in both mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OOXML_PORT=18085
+          export OOXML_CONTEXT_PATH=/ooxml-compat-normalize
+          export OOXML_ENGINE_MODE=both
+          export OOXML_DEFAULT_ENGINE=python
+          docker compose -f docker-compose.combined.yml up --build -d
+
+      - name: Verify runtime mode switching starts and stops real backends
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OOXML_PORT=18085
+          export OOXML_CONTEXT_PATH=/ooxml-compat-normalize
+          export OOXML_ENGINE_MODE=both
+          export OOXML_DEFAULT_ENGINE=python
+          BASE_URL="http://127.0.0.1:${OOXML_PORT}${OOXML_CONTEXT_PATH}"
+
+          compose() {
+            docker compose -f docker-compose.combined.yml "$@"
+          }
+          cleanup() {
+            compose logs normalizer-combined || true
+            compose down -v || true
+          }
+          trap cleanup EXIT
+
+          wait_info() {
+            engine="$1"
+            expected="$2"
+            for i in $(seq 1 90); do
+              status="$(curl -sS -o "/tmp/info-${engine}.txt" -w '%{http_code}' "$BASE_URL/api/info?engine=$engine" || true)"
+              if [ "$status" = "$expected" ]; then
+                return 0
+              fi
+              sleep 1
+            done
+            echo "Expected engine=$engine HTTP $expected" >&2
+            cat "/tmp/info-${engine}.txt" 2>/dev/null || true
+            return 1
+          }
+
+          process_dump() {
+            compose exec -T normalizer-combined sh -c 'for f in /proc/[0-9]*/cmdline; do tr "\000" " " < "$f" 2>/dev/null || true; echo; done'
+          }
+
+          for i in $(seq 1 120); do
+            if curl -fsS "$BASE_URL/api/mode" > /tmp/mode.json; then
+              break
+            fi
+            sleep 1
+          done
+          grep -q '"mode"[[:space:]]*:[[:space:]]*"both"' /tmp/mode.json
+          grep -q '"python"' /tmp/mode.json
+          grep -q '"java"' /tmp/mode.json
+          wait_info python 200
+          wait_info java 200
+
+          curl -fsS "$BASE_URL/" > /tmp/home.html
+          grep -q 'id="mode"' /tmp/home.html
+          grep -q 'value="both"' /tmp/home.html
+          grep -q 'Solo Python' /tmp/home.html
+          grep -q 'Solo Java / Quarkus' /tmp/home.html
+
+          curl -fsS -X POST "$BASE_URL/api/mode?mode=python" > /tmp/mode-python.json
+          grep -q '"mode"[[:space:]]*:[[:space:]]*"python"' /tmp/mode-python.json
+          wait_info python 200
+          wait_info java 409
+          dump="$(process_dump)"
+          grep -q 'ooxml_compat_normalize.web_server' <<<"$dump"
+          if grep -q 'ooxml-compat-normalize-quarkus.jar' <<<"$dump"; then
+            echo 'Java backend is still running in python-only mode' >&2
+            exit 1
+          fi
+
+          curl -fsS -X POST "$BASE_URL/api/mode?mode=java" > /tmp/mode-java.json
+          grep -q '"mode"[[:space:]]*:[[:space:]]*"java"' /tmp/mode-java.json
+          wait_info java 200
+          wait_info python 409
+          dump="$(process_dump)"
+          grep -q 'ooxml-compat-normalize-quarkus.jar' <<<"$dump"
+          if grep -q 'ooxml_compat_normalize.web_server' <<<"$dump"; then
+            echo 'Python backend is still running in java-only mode' >&2
+            exit 1
+          fi
+
+          curl -fsS -X POST "$BASE_URL/api/mode?mode=both" > /tmp/mode-both.json
+          grep -q '"mode"[[:space:]]*:[[:space:]]*"both"' /tmp/mode-both.json
+          wait_info python 200
+          wait_info java 200
+
+          # Restart must return to the configured startup mode.
+          compose restart normalizer-combined
+          for i in $(seq 1 90); do
+            if curl -fsS "$BASE_URL/api/mode" > /tmp/mode-restart.json; then
+              break
+            fi
+            sleep 1
+          done
+          grep -q '"mode"[[:space:]]*:[[:space:]]*"both"' /tmp/mode-restart.json
+          wait_info python 200
+          wait_info java 200
+
+          trap - EXIT
+          cleanup

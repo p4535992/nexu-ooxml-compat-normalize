@@ -199,7 +199,7 @@ jobs:
         shell: bash
         run: mvn -B -ntp -f quarkus/pom.xml clean verify package
 
-      - name: Smoke-test Quarkus uber-JAR, home page and diagnostic log
+      - name: Smoke-test Quarkus uber-JAR, context-path home page and diagnostic log
         shell: bash
         run: |
           set -euo pipefail
@@ -207,14 +207,16 @@ jobs:
           test -n "$QUARKUS_JAR"
           LOG_FILE="$RUNNER_TEMP/ooxml-quarkus-smoke.log"
           HOME_FILE="$RUNNER_TEMP/ooxml-quarkus-home.html"
+          CONTEXT_PATH=/ooxml-compat-normalize
+          BASE_URL="http://127.0.0.1:18080${CONTEXT_PATH}"
           rm -f "$LOG_FILE" "$HOME_FILE"
-          OOXML_LOG_FILE="$LOG_FILE" QUARKUS_HTTP_PORT=18080 \
+          OOXML_LOG_FILE="$LOG_FILE" OOXML_CONTEXT_PATH="$CONTEXT_PATH" QUARKUS_HTTP_PORT=18080 \
             java -jar "$QUARKUS_JAR" >"$RUNNER_TEMP/ooxml-quarkus-console.log" 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
           started=false
           for i in $(seq 1 45); do
-            if curl -fsS http://127.0.0.1:18080/api/info >"$RUNNER_TEMP/ooxml-info.json"; then
+            if curl -fsS "$BASE_URL/api/info" >"$RUNNER_TEMP/ooxml-info.json"; then
               started=true
               break
             fi
@@ -226,9 +228,15 @@ jobs:
             [[ -f "$LOG_FILE" ]] && cat "$LOG_FILE"
             exit 1
           fi
-          curl -fsS http://127.0.0.1:18080/ > "$HOME_FILE"
+          curl -fsS "$BASE_URL/" > "$HOME_FILE"
           grep -q 'OOXML Compat Normalize' "$HOME_FILE"
           grep -q 'Normalizza e scarica' "$HOME_FILE"
+          grep -q '"contextPath":"/ooxml-compat-normalize"' "$RUNNER_TEMP/ooxml-info.json" || \
+            grep -q '"contextPath"[[:space:]]*:[[:space:]]*"/ooxml-compat-normalize"' "$RUNNER_TEMP/ooxml-info.json"
+          if curl -fsS http://127.0.0.1:18080/api/info >/dev/null 2>&1; then
+            echo 'Unexpected root-level /api/info route' >&2
+            exit 1
+          fi
           cat "$RUNNER_TEMP/ooxml-info.json"
           for i in $(seq 1 20); do
             [[ -s "$LOG_FILE" ]] && break
@@ -317,22 +325,25 @@ jobs:
             -Destination quarkus/target/jpackage `
             -AppVersion 0.4.0
 
-      - name: Smoke-test Windows packaged Quarkus EXE, home page and portable log
+      - name: Smoke-test Windows packaged Quarkus EXE, context-path home page and portable log
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $appDir = Resolve-Path 'quarkus/target/jpackage/OOXML-Compat-Normalize-Quarkus'
           $app = Join-Path $appDir 'OOXML-Compat-Normalize-Quarkus.exe'
           $log = Join-Path $appDir 'logs/ooxml-compat-normalize-quarkus.log'
+          $context = '/ooxml-compat-normalize'
+          $baseUrl = "http://127.0.0.1:18081$context"
           Remove-Item $log -Force -ErrorAction SilentlyContinue
           $env:QUARKUS_HTTP_PORT = '18081'
+          $env:OOXML_CONTEXT_PATH = $context
           $process = Start-Process -FilePath $app -WorkingDirectory $appDir -PassThru
           try {
             $started = $false
             for ($i = 0; $i -lt 60; $i++) {
               try {
-                $response = Invoke-RestMethod -Uri 'http://127.0.0.1:18081/api/info' -TimeoutSec 2
-                if ($response.name -eq 'ooxml-compat-normalize-quarkus') {
+                $response = Invoke-RestMethod -Uri "$baseUrl/api/info" -TimeoutSec 2
+                if ($response.name -eq 'ooxml-compat-normalize-quarkus' -and $response.contextPath -eq $context) {
                   $started = $true
                   break
                 }
@@ -345,9 +356,15 @@ jobs:
               if (Test-Path $log) { Get-Content $log }
               throw 'Packaged Quarkus EXE did not become ready'
             }
-            $homePage = Invoke-WebRequest -Uri 'http://127.0.0.1:18081/' -TimeoutSec 5
+            $homePage = Invoke-WebRequest -Uri "$baseUrl/" -TimeoutSec 5
             if ($homePage.StatusCode -ne 200 -or $homePage.Content -notmatch 'Normalizza e scarica') {
-              throw 'Packaged Quarkus home page is not available'
+              throw 'Packaged Quarkus context-path home page is not available'
+            }
+            try {
+              $rootApi = Invoke-WebRequest -Uri 'http://127.0.0.1:18081/api/info' -TimeoutSec 2 -ErrorAction Stop
+              if ($rootApi.StatusCode -eq 200) { throw 'Unexpected root-level /api/info route' }
+            } catch {
+              if ($_.Exception.Message -eq 'Unexpected root-level /api/info route') { throw }
             }
             for ($i = 0; $i -lt 20 -and -not (Test-Path $log); $i++) { Start-Sleep -Milliseconds 250 }
             if (-not (Test-Path $log)) { throw "Portable diagnostic log was not created beside the EXE: $log" }
@@ -396,24 +413,28 @@ jobs:
           DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
           mkdir -p "$DIR/logs"
           export OOXML_LOG_FILE="$DIR/logs/ooxml-compat-normalize-quarkus.log"
+          : "${OOXML_CONTEXT_PATH:=/ooxml-compat-normalize}"
+          export OOXML_CONTEXT_PATH
           exec "$DIR/runtime/bin/java" -jar "$DIR/OOXML-Compat-Normalize-java-quarkus.jar" "$@"
           EOF
           chmod +x java-portable/ooxml-normalize java-portable/ooxml-quarkus
 
-      - name: Smoke-test Linux Java portable core, home page and portable log
+      - name: Smoke-test Linux Java portable core, context-path home page and portable log
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           java-portable/ooxml-normalize --help
           LOG_FILE="$PWD/java-portable/logs/ooxml-compat-normalize-quarkus.log"
+          CONTEXT_PATH=/ooxml-compat-normalize
+          BASE_URL="http://127.0.0.1:18082${CONTEXT_PATH}"
           rm -f "$LOG_FILE"
-          QUARKUS_HTTP_PORT=18082 java-portable/ooxml-quarkus >"$RUNNER_TEMP/ooxml-quarkus-portable-console.log" 2>&1 &
+          OOXML_CONTEXT_PATH="$CONTEXT_PATH" QUARKUS_HTTP_PORT=18082 java-portable/ooxml-quarkus >"$RUNNER_TEMP/ooxml-quarkus-portable-console.log" 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
           started=false
           for i in $(seq 1 45); do
-            if curl -fsS http://127.0.0.1:18082/api/info >/dev/null; then started=true; break; fi
+            if curl -fsS "$BASE_URL/api/info" >/dev/null; then started=true; break; fi
             if ! kill -0 "$PID" 2>/dev/null; then break; fi
             sleep 1
           done
@@ -422,7 +443,11 @@ jobs:
             [[ -f "$LOG_FILE" ]] && cat "$LOG_FILE"
             exit 1
           fi
-          curl -fsS http://127.0.0.1:18082/ | grep -q 'Normalizza e scarica'
+          curl -fsS "$BASE_URL/" | grep -q 'Normalizza e scarica'
+          if curl -fsS http://127.0.0.1:18082/api/info >/dev/null 2>&1; then
+            echo 'Unexpected root-level /api/info route' >&2
+            exit 1
+          fi
           test -s "$LOG_FILE"
           grep -q 'OOXML Compat Normalize Quarkus local service started' "$LOG_FILE"
           kill "$PID" 2>/dev/null || true

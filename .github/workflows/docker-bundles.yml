@@ -1,0 +1,168 @@
+name: Docker Compose bundles
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional existing release tag to receive the Docker bundle assets'
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.python'
+      - 'Dockerfile.combined'
+      - 'docker-compose.java.yml'
+      - 'docker-compose.python.yml'
+      - 'docker-compose.combined.yml'
+      - '.dockerignore'
+      - 'docker/**'
+      - 'java/**'
+      - 'quarkus/**'
+      - 'src/**'
+      - 'dotnet/**'
+      - 'pyproject.toml'
+      - 'README.md'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
+      - 'THIRD_PARTY_LICENSES.md'
+      - '.github/workflows/docker-bundles.yml'
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  bundles:
+    name: Build Docker bundle archives
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout main push
+        if: github.event_name == 'push'
+        uses: actions/checkout@v5
+
+      - name: Checkout release tag
+        if: github.event_name == 'release'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Checkout manual ref
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+
+      - name: Prepare Java, Python and combined Docker bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf docker-bundle-work docker-release
+          mkdir -p docker-bundle-work docker-release
+
+          JAVA_ROOT='docker-bundle-work/OOXML-Compat-Normalize-docker-java'
+          PYTHON_ROOT='docker-bundle-work/OOXML-Compat-Normalize-docker-python'
+          COMBINED_ROOT='docker-bundle-work/OOXML-Compat-Normalize-docker-combined'
+
+          mkdir -p "$JAVA_ROOT" "$PYTHON_ROOT" "$COMBINED_ROOT"
+
+          # Java-only bundle.
+          cp docker-compose.java.yml "$JAVA_ROOT/docker-compose.yml"
+          cp Dockerfile .dockerignore "$JAVA_ROOT/"
+          cp -a java quarkus "$JAVA_ROOT/"
+          cp docker/README.md "$JAVA_ROOT/DOCKER-README.md"
+          cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md "$JAVA_ROOT/"
+
+          # Python-only bundle.
+          cp docker-compose.python.yml "$PYTHON_ROOT/docker-compose.yml"
+          cp Dockerfile.python .dockerignore pyproject.toml README.md "$PYTHON_ROOT/"
+          cp -a src dotnet "$PYTHON_ROOT/"
+          cp docker/README.md "$PYTHON_ROOT/DOCKER-README.md"
+          cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md "$PYTHON_ROOT/"
+
+          # Combined single-container bundle with both engines and the engine-selecting gateway.
+          cp docker-compose.combined.yml "$COMBINED_ROOT/docker-compose.yml"
+          cp Dockerfile.combined .dockerignore pyproject.toml README.md "$COMBINED_ROOT/"
+          cp -a src dotnet java quarkus "$COMBINED_ROOT/"
+          mkdir -p "$COMBINED_ROOT/docker"
+          cp docker/combined_gateway.py "$COMBINED_ROOT/docker/"
+          cp docker/README.md "$COMBINED_ROOT/DOCKER-README.md"
+          cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md "$COMBINED_ROOT/"
+
+          for root in "$JAVA_ROOT" "$PYTHON_ROOT" "$COMBINED_ROOT"; do
+            name="$(basename "$root")"
+            (
+              cd docker-bundle-work
+              zip -9 -q -r "../docker-release/${name}.zip" "$name"
+              tar -czf "../docker-release/${name}.tar.gz" "$name"
+            )
+          done
+
+          sha256sum docker-release/*.zip docker-release/*.tar.gz > docker-release/SHA256SUMS-docker.txt
+
+      - name: Verify archive roots and required compose files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          out = Path('docker-release')
+          archives = sorted(out.glob('OOXML-Compat-Normalize-docker-*.zip')) + sorted(out.glob('OOXML-Compat-Normalize-docker-*.tar.gz'))
+          if len(archives) != 6:
+              raise SystemExit(f'Expected 6 Docker archives, found {len(archives)}')
+
+          for archive in archives:
+              if archive.name.endswith('.tar.gz'):
+                  expected = archive.name[:-7]
+                  with tarfile.open(archive, 'r:gz') as tf:
+                      names = [m.name for m in tf.getmembers()]
+              else:
+                  expected = archive.stem
+                  with zipfile.ZipFile(archive) as zf:
+                      names = zf.namelist()
+
+              roots = {
+                  raw.replace('\\', '/').lstrip('./').split('/', 1)[0]
+                  for raw in names
+                  if raw.replace('\\', '/').lstrip('./')
+              }
+              if roots != {expected}:
+                  raise SystemExit(f'{archive.name}: unexpected roots {sorted(roots)}')
+              compose = f'{expected}/docker-compose.yml'
+              if compose not in names:
+                  raise SystemExit(f'{archive.name}: missing {compose}')
+              print(f'{archive.name}: OK')
+          PY
+
+      - name: Upload Docker bundle build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OOXML-Compat-Normalize-docker-bundles
+          path: docker-release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach bundles to published or explicitly selected release
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+          MANUAL_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          TAG="${RELEASE_EVENT_TAG:-${MANUAL_TAG:-}}"
+          test -n "$TAG"
+          gh release upload "$TAG" \
+            docker-release/*.zip \
+            docker-release/*.tar.gz \
+            docker-release/SHA256SUMS-docker.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber

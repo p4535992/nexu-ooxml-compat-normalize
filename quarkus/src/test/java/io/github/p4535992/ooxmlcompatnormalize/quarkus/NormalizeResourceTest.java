@@ -14,10 +14,11 @@ class NormalizeResourceTest {
 
     @Test
     void infoEndpointIsAvailableUnderConfiguredContextPath() {
-        // QuarkusTest configures RestAssured with quarkus.http.root-path already,
-        // so request paths here are relative to the configured application context.
+        // QuarkusTest may preconfigure RestAssured's basePath from the HTTP root.
+        // Clear it here and exercise the same absolute URL path used by real clients.
         given()
-                .when().get("/api/info")
+                .basePath("")
+                .when().get(CONTEXT + "/api/info")
                 .then()
                 .statusCode(200)
                 .body("name", equalTo("ooxml-compat-normalize-quarkus"))
@@ -29,7 +30,8 @@ class NormalizeResourceTest {
     @Test
     void homePageIsAvailableUnderConfiguredContextPath() {
         given()
-                .when().get("/")
+                .basePath("")
+                .when().get(CONTEXT + "/")
                 .then()
                 .statusCode(200)
                 .contentType("text/html")

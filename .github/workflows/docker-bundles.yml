@@ -103,6 +103,7 @@ jobs:
           done
 
           sha256sum docker-release/*.zip docker-release/*.tar.gz > docker-release/SHA256SUMS-docker.txt
+          ls -lh docker-release/
 
       - name: Verify archive roots and required compose files
         shell: bash
@@ -141,13 +142,20 @@ jobs:
               print(f'{archive.name}: OK')
           PY
 
-      - name: Upload Docker bundle build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: OOXML-Compat-Normalize-docker-bundles
-          path: docker-release/
-          if-no-files-found: error
-          retention-days: 14
+      - name: Publish generated filenames in workflow summary
+        shell: bash
+        run: |
+          {
+            echo '## Docker bundle archives'
+            echo
+            echo 'The archives were generated and verified in this run.'
+            echo
+            echo '```text'
+            find docker-release -maxdepth 1 -type f -printf '%f\n' | sort
+            echo '```'
+            echo
+            echo 'Permanent downloads are attached directly to GitHub Releases, avoiding GitHub Actions artifact-storage quota.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attach bundles to published or explicitly selected release
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')

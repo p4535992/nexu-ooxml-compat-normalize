@@ -11,6 +11,7 @@ services:
     environment:
       OOXML_HTTP_HOST: "0.0.0.0"
       OOXML_HTTP_PORT: "8080"
+      OOXML_CONTEXT_PATH: "${OOXML_CONTEXT_PATH:-/ooxml-compat-normalize}"
       OOXML_LOG_FILE: "/data/logs/ooxml-compat-normalize-python.log"
       OOXML_OPENXML_VALIDATOR: "/app/validator/OpenXmlSdkValidator"
       OOXML_SDK_VALIDATION: "required"

@@ -1,0 +1,69 @@
+# syntax=docker/dockerfile:1.7
+
+FROM maven:3.9.16-eclipse-temurin-17 AS java-build
+WORKDIR /workspace
+COPY java/ java/
+COPY quarkus/ quarkus/
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -ntp -f java/pom.xml clean install -DskipTests \
+    && mvn -B -ntp -f quarkus/pom.xml clean package -DskipTests \
+    && runner="$(find quarkus/target -maxdepth 1 -type f -name '*-runner.jar' -print -quit)" \
+    && test -n "$runner" \
+    && cp "$runner" /tmp/ooxml-compat-normalize-quarkus.jar
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS validator-build
+WORKDIR /workspace
+COPY dotnet/OpenXmlSdkValidator/ dotnet/OpenXmlSdkValidator/
+RUN dotnet publish dotnet/OpenXmlSdkValidator/OpenXmlSdkValidator.csproj \
+    -c Release \
+    -r linux-x64 \
+    --self-contained true \
+    -p:PublishSingleFile=true \
+    -p:IncludeNativeLibrariesForSelfExtract=true \
+    -p:DebugType=None \
+    -p:DebugSymbols=false \
+    -o /out/validator \
+    && cp /usr/share/dotnet/LICENSE.txt /out/validator/dotnet-LICENSE.txt \
+    && cp /usr/share/dotnet/ThirdPartyNotices.txt /out/validator/dotnet-ThirdPartyNotices.txt
+
+FROM python:3.12-slim-bookworm
+
+LABEL org.opencontainers.image.title="OOXML Compat Normalize - Java + Python" \
+      org.opencontainers.image.description="Combined OOXML normalization web/API service with selectable Java or Python engine" \
+      org.opencontainers.image.source="https://github.com/p4535992/ooxml-compat-normalize"
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md /app/licenses/
+COPY src/ src/
+COPY docker/combined_gateway.py /app/docker/combined_gateway.py
+COPY --from=java-build /tmp/ooxml-compat-normalize-quarkus.jar /app/java/ooxml-compat-normalize-quarkus.jar
+COPY --from=validator-build /out/validator/OpenXmlSdkValidator /app/validator/OpenXmlSdkValidator
+COPY --from=validator-build /out/validator/dotnet-LICENSE.txt /app/licenses/dotnet/LICENSE.txt
+COPY --from=validator-build /out/validator/dotnet-ThirdPartyNotices.txt /app/licenses/dotnet/ThirdPartyNotices.txt
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-17-jre-headless libicu72 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-cache-dir . \
+    && mkdir -p /data/logs /app/java \
+    && chmod +x /app/validator/OpenXmlSdkValidator \
+    && chown -R 10001:0 /app /data \
+    && chmod -R g=u /app /data
+
+ENV OOXML_HTTP_HOST=0.0.0.0 \
+    OOXML_HTTP_PORT=8080 \
+    OOXML_CONTEXT_PATH=/ooxml-compat-normalize \
+    OOXML_DEFAULT_ENGINE=python \
+    OOXML_JAVA_INTERNAL_PORT=18081 \
+    OOXML_PYTHON_INTERNAL_PORT=18082 \
+    OOXML_GATEWAY_LOG_FILE=/data/logs/ooxml-compat-normalize-gateway.log \
+    OOXML_OPENXML_VALIDATOR=/app/validator/OpenXmlSdkValidator \
+    OOXML_SDK_VALIDATION=required \
+    PYTHONUNBUFFERED=1
+
+USER 10001
+EXPOSE 8080
+
+ENTRYPOINT ["python", "/app/docker/combined_gateway.py"]

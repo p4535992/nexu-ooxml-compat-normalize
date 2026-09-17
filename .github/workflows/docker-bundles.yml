@@ -61,6 +61,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sh -n docker/start_all.sh
+          sh -n docker/down_all.sh
+
           rm -rf docker-bundle-work docker-release
           mkdir -p docker-bundle-work docker-release
 
@@ -76,6 +79,7 @@ jobs:
           cp Dockerfile .dockerignore "$JAVA_ROOT/"
           cp -a java quarkus "$JAVA_ROOT/"
           cp docker/README.md "$JAVA_ROOT/DOCKER-README.md"
+          cp docker/start_all.sh docker/down_all.sh "$JAVA_ROOT/"
           cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md "$JAVA_ROOT/"
 
           # Python-only bundle.
@@ -83,6 +87,7 @@ jobs:
           cp Dockerfile.python .dockerignore pyproject.toml README.md "$PYTHON_ROOT/"
           cp -a src dotnet "$PYTHON_ROOT/"
           cp docker/README.md "$PYTHON_ROOT/DOCKER-README.md"
+          cp docker/start_all.sh docker/down_all.sh "$PYTHON_ROOT/"
           cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md "$PYTHON_ROOT/"
 
           # Combined single-container bundle with both engines and the engine-selecting gateway.
@@ -92,9 +97,17 @@ jobs:
           mkdir -p "$COMBINED_ROOT/docker"
           cp docker/combined_gateway.py "$COMBINED_ROOT/docker/"
           cp docker/README.md "$COMBINED_ROOT/DOCKER-README.md"
+          cp docker/start_all.sh docker/down_all.sh "$COMBINED_ROOT/"
           cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md "$COMBINED_ROOT/"
 
           for root in "$JAVA_ROOT" "$PYTHON_ROOT" "$COMBINED_ROOT"; do
+            chmod +x "$root/start_all.sh" "$root/down_all.sh"
+            (
+              cd "$root"
+              docker compose config --quiet
+              sh -n start_all.sh
+              sh -n down_all.sh
+            )
             name="$(basename "$root")"
             (
               cd docker-bundle-work
@@ -106,7 +119,7 @@ jobs:
           sha256sum docker-release/*.zip docker-release/*.tar.gz > docker-release/SHA256SUMS-docker.txt
           ls -lh docker-release/
 
-      - name: Verify archive roots and required compose files
+      - name: Verify archive roots, compose and operator scripts
         shell: bash
         run: |
           set -euo pipefail
@@ -124,11 +137,26 @@ jobs:
               if archive.name.endswith('.tar.gz'):
                   expected = archive.name[:-7]
                   with tarfile.open(archive, 'r:gz') as tf:
-                      names = [m.name for m in tf.getmembers()]
+                      members = {m.name: m for m in tf.getmembers()}
+                      names = list(members)
+                      for script in ('start_all.sh', 'down_all.sh'):
+                          member = members.get(f'{expected}/{script}')
+                          if member is None:
+                              raise SystemExit(f'{archive.name}: missing {script}')
+                          if member.mode & 0o111 == 0:
+                              raise SystemExit(f'{archive.name}: {script} is not executable')
               else:
                   expected = archive.stem
                   with zipfile.ZipFile(archive) as zf:
-                      names = zf.namelist()
+                      infos = {i.filename: i for i in zf.infolist()}
+                      names = list(infos)
+                      for script in ('start_all.sh', 'down_all.sh'):
+                          info = infos.get(f'{expected}/{script}')
+                          if info is None:
+                              raise SystemExit(f'{archive.name}: missing {script}')
+                          mode = (info.external_attr >> 16) & 0o777
+                          if mode & 0o111 == 0:
+                              raise SystemExit(f'{archive.name}: {script} is not executable')
 
               roots = {
                   raw.replace('\\', '/').lstrip('./').split('/', 1)[0]
@@ -140,7 +168,7 @@ jobs:
               compose = f'{expected}/docker-compose.yml'
               if compose not in names:
                   raise SystemExit(f'{archive.name}: missing {compose}')
-              print(f'{archive.name}: OK')
+              print(f'{archive.name}: root, compose and scripts OK')
           PY
 
       - name: Publish generated filenames in workflow summary
@@ -150,6 +178,7 @@ jobs:
             echo '## Docker bundle archives'
             echo
             echo 'The archives were generated and verified in this run.'
+            echo 'Each bundle contains executable start_all.sh and down_all.sh helper scripts.'
             echo
             echo '```text'
             find docker-release -maxdepth 1 -type f -printf '%f\n' | sort

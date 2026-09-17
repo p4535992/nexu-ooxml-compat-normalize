@@ -10,20 +10,24 @@ import static org.hamcrest.Matchers.hasItems;
 
 @QuarkusTest
 class NormalizeResourceTest {
+    private static final String CONTEXT = "/ooxml-compat-normalize";
+
     @Test
-    void infoEndpointIsAvailable() {
+    void infoEndpointIsAvailableUnderContextPath() {
         given()
-                .when().get("/api/info")
+                .when().get(CONTEXT + "/api/info")
                 .then()
                 .statusCode(200)
                 .body("name", equalTo("ooxml-compat-normalize-quarkus"))
+                .body("engine", equalTo("java"))
+                .body("contextPath", equalTo(CONTEXT))
                 .body("formats", hasItems("docx", "xlsx", "pptx"));
     }
 
     @Test
-    void homePageIsAvailable() {
+    void homePageIsAvailableUnderContextPath() {
         given()
-                .when().get("/")
+                .when().get(CONTEXT + "/")
                 .then()
                 .statusCode(200)
                 .contentType("text/html")

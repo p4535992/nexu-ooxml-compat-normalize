@@ -4,6 +4,14 @@ Small local web/API wrapper around the Java core normalizer.
 
 It is intentionally local-first: by default it listens only on `127.0.0.1:8080` and does not send documents to external services.
 
+The application has a default HTTP context path:
+
+```text
+/ooxml-compat-normalize
+```
+
+Override it with `OOXML_CONTEXT_PATH` when needed.
+
 ## Build
 
 First install the Java core into the local Maven repository, then build Quarkus:
@@ -28,10 +36,10 @@ java -jar OOXML-Compat-Normalize-java-quarkus.jar
 Then open:
 
 ```text
-http://127.0.0.1:8080/
+http://127.0.0.1:8080/ooxml-compat-normalize/
 ```
 
-The service intentionally binds to IPv4 loopback. On machines where `localhost` resolves to IPv6 (`::1`) first, `http://localhost:8080/` can fail even though the service is running. Use the explicit `127.0.0.1` URL above.
+The service intentionally binds to IPv4 loopback. On machines where `localhost` resolves to IPv6 (`::1`) first, `http://localhost:8080/ooxml-compat-normalize/` can fail even though the service is running. Use the explicit `127.0.0.1` URL above.
 
 ## Windows EXE
 
@@ -50,7 +58,7 @@ OOXML-Compat-Normalize-Quarkus.exe
 
 The package includes its Java runtime, so Java does not need to be installed globally. It also contains `ooxml-normalize.cmd` to run the Java core CLI using the same bundled runtime.
 
-The packaged Windows launcher opens `http://127.0.0.1:8080/` automatically after the local service reports ready. `open-ui.cmd` is also included as a manual shortcut.
+The packaged Windows launcher opens `http://127.0.0.1:8080/ooxml-compat-normalize/` automatically after the local service reports ready. `open-ui.cmd` uses the same context path and is also included as a manual shortcut.
 
 The packaging approach follows the same `jpackage` app-image + Windows EXE pattern used by the NexU project.
 
@@ -78,15 +86,19 @@ When running the raw JAR directly, the default is a relative path:
 
 The log rotates at 10 MB, keeps up to 5 backups, and rotates on startup. The raw JAR path can be overridden with the `OOXML_LOG_FILE` environment variable.
 
-The release CI validates all of these points: it starts the packaged application, calls `/api/info`, fetches the actual `/` HTML page, verifies the text `Normalizza e scarica`, and checks that the startup marker is written to the portable `logs/` directory.
+The release CI validates all of these points: it starts the packaged application, calls `/ooxml-compat-normalize/api/info`, fetches the actual `/ooxml-compat-normalize/` HTML page, verifies the text `Normalizza e scarica`, checks that root-level `/api/info` is not exposed, and checks that the startup marker is written to the portable `logs/` directory.
 
 See [`jpackage/LOGS.txt`](jpackage/LOGS.txt).
 
 ## Endpoints
 
-- `GET /api/info` — service/version/formats.
-- `POST /api/audit` — raw OOXML bytes; requires `X-Filename` header.
-- `POST /api/normalize?profile=interop-transitional-v1` — raw OOXML bytes; returns normalized OOXML.
+With the default context path:
+
+- `GET /ooxml-compat-normalize/api/info` — service/version/formats/context path.
+- `POST /ooxml-compat-normalize/api/audit` — raw OOXML bytes; requires `X-Filename` header.
+- `POST /ooxml-compat-normalize/api/normalize?profile=interop-transitional-v1` — raw OOXML bytes; returns normalized OOXML.
+
+Set `OOXML_CONTEXT_PATH=/your-prefix` to move the UI and all API endpoints together under another prefix.
 
 Supported input/output families remain the same: DOCX→DOCX, XLSX→XLSX, PPTX→PPTX.
 

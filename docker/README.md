@@ -326,17 +326,17 @@ The default host binding is deliberately loopback-only. Set `OOXML_BIND_ADDRESS=
 
 ## Downloadable Docker bundles
 
-The project keeps the dedicated Java and Python distributions available even after adding the combined container. CI/release packaging produces **both ZIP and TAR.GZ** variants:
+The project keeps the established Java and Python Docker Compose ZIP names available after adding the combined container, and adds **TAR.GZ alternatives** for all three variants:
 
 ```text
-OOXML-Compat-Normalize-docker-java.zip
-OOXML-Compat-Normalize-docker-java.tar.gz
+OOXML-Compat-Normalize-java-docker-compose.zip
+OOXML-Compat-Normalize-java-docker-compose.tar.gz
 
-OOXML-Compat-Normalize-docker-python.zip
-OOXML-Compat-Normalize-docker-python.tar.gz
+OOXML-Compat-Normalize-python-docker-compose.zip
+OOXML-Compat-Normalize-python-docker-compose.tar.gz
 
-OOXML-Compat-Normalize-docker-combined.zip
-OOXML-Compat-Normalize-docker-combined.tar.gz
+OOXML-Compat-Normalize-combined-docker-compose.zip
+OOXML-Compat-Normalize-combined-docker-compose.tar.gz
 
 SHA256SUMS-docker.txt
 ```
@@ -355,7 +355,7 @@ docker compose up --build -d
 
 The bundles include the source files needed by their corresponding Docker build; they do not require cloning the repository separately.
 
-`.github/workflows/docker-bundles.yml` creates these archives on relevant `main` changes. It also attaches the six archives plus `SHA256SUMS-docker.txt` whenever a GitHub Release is published. A manual workflow run can attach them to a specific existing release tag.
+`.github/workflows/docker-bundles.yml` creates and verifies these archives on relevant `main` changes. Permanent downloads are attached directly to each GitHub Release, avoiding dependency on the GitHub Actions temporary-artifact quota. A manual workflow run can also attach them to a specific existing release tag.
 
 ## Container security model
 

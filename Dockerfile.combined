@@ -29,7 +29,7 @@ RUN dotnet publish dotnet/OpenXmlSdkValidator/OpenXmlSdkValidator.csproj \
 FROM python:3.12-slim-bookworm
 
 LABEL org.opencontainers.image.title="OOXML Compat Normalize - Java + Python" \
-      org.opencontainers.image.description="Combined OOXML normalization web/API service with selectable Java or Python engine" \
+      org.opencontainers.image.description="Combined OOXML normalization web/API service with runtime both/python/java engine modes" \
       org.opencontainers.image.source="https://github.com/p4535992/ooxml-compat-normalize"
 
 WORKDIR /app
@@ -55,6 +55,7 @@ RUN apt-get update \
 ENV OOXML_HTTP_HOST=0.0.0.0 \
     OOXML_HTTP_PORT=8080 \
     OOXML_CONTEXT_PATH=/ooxml-compat-normalize \
+    OOXML_ENGINE_MODE=both \
     OOXML_DEFAULT_ENGINE=python \
     OOXML_JAVA_INTERNAL_PORT=18081 \
     OOXML_PYTHON_INTERNAL_PORT=18082 \

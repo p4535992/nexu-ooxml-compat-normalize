@@ -8,14 +8,8 @@ permissions:
   contents: read
 jobs:
   diagnose:
-    name: Test resource registration - ${{ matrix.variant }}
+    name: Verify original HTTP assertions against packaged application
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [module-directory, absolute-path, explicit-scope, flat-classpath]
-    env:
-      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -28,31 +22,34 @@ jobs:
           cache-dependency-path: |
             java/pom.xml
             quarkus/pom.xml
-      - name: Isolate test bootstrap settings without changing assertions
+      - name: Run the existing HTTP contract as a packaged integration test
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import os
-          variant = os.environ['VARIANT']
-          p = Path('quarkus/src/main/java/io/github/p4535992/ooxmlcompatnormalize/quarkus/NormalizeResource.java')
-          s = p.read_text()
-          if variant == 'absolute-path':
-              s = s.replace('@Path("api")', '@Path("/api")').replace('@Path("info")', '@Path("/info")').replace('@Path("audit")', '@Path("/audit")').replace('@Path("normalize")', '@Path("/normalize")')
-          elif variant == 'explicit-scope':
-              s = s.replace('@Path("api")', '@jakarta.enterprise.context.ApplicationScoped\n@Path("api")')
-          elif variant == 'flat-classpath':
-              config = Path('quarkus/src/main/resources/application.properties')
-              config.write_text(config.read_text() + '\nquarkus.test.flat-class-path=true\n')
-          p.write_text(s)
+          p = Path('quarkus/src/test/java/io/github/p4535992/ooxmlcompatnormalize/quarkus/NormalizeResourceTest.java')
+          s = p.read_text().replace('QuarkusTest', 'QuarkusIntegrationTest').replace('class NormalizeResourceTest', 'class NormalizeResourceIT')
+          p.with_name('NormalizeResourceIT.java').write_text(s)
+          p.unlink()
+          pom = Path('quarkus/pom.xml')
+          plugin = '''      <plugin>
+                  <groupId>org.apache.maven.plugins</groupId>
+                  <artifactId>maven-failsafe-plugin</artifactId>
+                  <version>${surefire-plugin.version}</version>
+                  <executions><execution><goals><goal>integration-test</goal><goal>verify</goal></goals></execution></executions>
+                  <configuration>
+                    <systemPropertyVariables>
+                      <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                      <maven.home>${maven.home}</maven.home>
+                    </systemPropertyVariables>
+                  </configuration>
+                </plugin>
+          '''
+          pom.write_text(pom.read_text().replace('    </plugins>', plugin + '    </plugins>'))
           PY
-      - name: Build core and run all original Quarkus assertions
+      - name: Build and verify without skipping tests
         shell: bash
         run: |
           set -euo pipefail
           mvn -B -ntp -f java/pom.xml clean install
-          if [ "$VARIANT" = module-directory ]; then
-            (cd quarkus && mvn -B -ntp clean test)
-          else
-            mvn -B -ntp -f quarkus/pom.xml clean test
-          fi
+          mvn -B -ntp -f quarkus/pom.xml clean verify

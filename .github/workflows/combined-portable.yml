@@ -1,0 +1,332 @@
+name: Combined desktop portable
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional existing release tag to receive the combined portable asset'
+        required: false
+        type: string
+  release:
+    types: [published]
+  push:
+    branches:
+      - main
+    paths:
+      - 'docker/combined_gateway.py'
+      - 'portable/OOXMLCompatNormalizeCombined.spec'
+      - 'src/**'
+      - 'java/**'
+      - 'quarkus/**'
+      - 'dotnet/**'
+      - 'pyproject.toml'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
+      - 'THIRD_PARTY_LICENSES.md'
+      - '.github/workflows/combined-portable.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Combined portable ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            root_name: OOXML-Compat-Normalize-combined-portable-win-x64
+            executable: OOXML-Compat-Normalize-Combined.exe
+            validator: dotnet/OpenXmlSdkValidator/bin/Release/net8.0/win-x64/publish/OpenXmlSdkValidator.exe
+          - os: ubuntu-22.04
+            rid: linux-x64
+            root_name: OOXML-Compat-Normalize-combined-portable-linux-x64
+            executable: OOXML-Compat-Normalize-Combined
+            validator: dotnet/OpenXmlSdkValidator/bin/Release/net8.0/linux-x64/publish/OpenXmlSdkValidator
+
+    steps:
+      - name: Checkout main push
+        if: github.event_name == 'push'
+        uses: actions/checkout@v5
+
+      - name: Checkout release tag
+        if: github.event_name == 'release'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Checkout manual ref
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: |
+            java/pom.xml
+            quarkus/pom.xml
+
+      - name: Build Java core and Quarkus
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -f java/pom.xml clean install
+          mvn -B -ntp -f quarkus/pom.xml clean verify package
+          test -n "$(find quarkus/target -maxdepth 1 -type f -name '*-runner.jar' -print -quit)"
+
+      - name: Build bundled Java runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf runtime
+          jlink             --add-modules ALL-MODULE-PATH             --strip-debug             --no-header-files             --no-man-pages             --compress=2             --output runtime
+          test -d runtime/legal
+          test -x runtime/bin/java || test -f runtime/bin/java.exe
+
+      - name: Publish self-contained Open XML SDK validator
+        shell: bash
+        run: >-
+          dotnet publish dotnet/OpenXmlSdkValidator/OpenXmlSdkValidator.csproj
+          -c Release
+          -r ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+
+      - name: Build combined PyInstaller executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip "pyinstaller>=6.10"
+          pyinstaller --clean --noconfirm portable/OOXMLCompatNormalizeCombined.spec
+          test -f "dist/${{ matrix.executable }}"
+
+      - name: Assemble Windows combined portable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rootName = '${{ matrix.root_name }}'
+          $root = Join-Path $PWD "combined-release/$rootName"
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $root 'java') -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $root 'validator') -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $root 'licenses/dotnet') -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $root 'logs') -Force | Out-Null
+
+          Copy-Item 'dist/OOXML-Compat-Normalize-Combined.exe' $root
+          Copy-Item 'runtime' $root -Recurse
+
+          $jar = Get-ChildItem 'quarkus/target' -Filter '*-runner.jar' -File | Select-Object -First 1
+          if (-not $jar) { throw 'Quarkus runner JAR not found' }
+          Copy-Item $jar.FullName (Join-Path $root 'java/ooxml-compat-normalize-quarkus.jar')
+
+          Copy-Item '${{ matrix.validator }}' (Join-Path $root 'validator/OpenXmlSdkValidator.exe')
+          Copy-Item 'LICENSE' (Join-Path $root 'LICENSE')
+          Copy-Item 'THIRD_PARTY_NOTICES.md' (Join-Path $root 'THIRD_PARTY_NOTICES.md')
+          Copy-Item 'THIRD_PARTY_LICENSES.md' (Join-Path $root 'THIRD_PARTY_LICENSES.md')
+          Copy-Item 'portable/COMBINED-README.md' (Join-Path $root 'README.md')
+
+          $dotnetLicense = Join-Path $env:DOTNET_ROOT 'LICENSE.txt'
+          $dotnetNotices = Join-Path $env:DOTNET_ROOT 'ThirdPartyNotices.txt'
+          if (-not (Test-Path $dotnetLicense)) { throw "Missing .NET license: $dotnetLicense" }
+          if (-not (Test-Path $dotnetNotices)) { throw "Missing .NET notices: $dotnetNotices" }
+          Copy-Item $dotnetLicense (Join-Path $root 'licenses/dotnet/LICENSE.txt')
+          Copy-Item $dotnetNotices (Join-Path $root 'licenses/dotnet/ThirdPartyNotices.txt')
+
+      - name: Assemble Linux combined portable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="combined-release/${{ matrix.root_name }}"
+          mkdir -p "$root/java" "$root/validator" "$root/licenses/dotnet" "$root/logs"
+          cp "dist/${{ matrix.executable }}" "$root/"
+          cp -a runtime "$root/runtime"
+          jar="$(find quarkus/target -maxdepth 1 -type f -name '*-runner.jar' -print -quit)"
+          test -n "$jar"
+          cp "$jar" "$root/java/ooxml-compat-normalize-quarkus.jar"
+          cp "${{ matrix.validator }}" "$root/validator/OpenXmlSdkValidator"
+          chmod +x "$root/OOXML-Compat-Normalize-Combined" "$root/validator/OpenXmlSdkValidator" "$root/runtime/bin/java"
+          cp LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.md "$root/"
+          cp portable/COMBINED-README.md "$root/README.md"
+          test -f "$DOTNET_ROOT/LICENSE.txt"
+          test -f "$DOTNET_ROOT/ThirdPartyNotices.txt"
+          cp "$DOTNET_ROOT/LICENSE.txt" "$root/licenses/dotnet/LICENSE.txt"
+          cp "$DOTNET_ROOT/ThirdPartyNotices.txt" "$root/licenses/dotnet/ThirdPartyNotices.txt"
+
+      - name: Smoke-test Windows combined executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Resolve-Path "combined-release/${{ matrix.root_name }}"
+          $exe = Join-Path $root 'OOXML-Compat-Normalize-Combined.exe'
+          $base = 'http://127.0.0.1:18086/ooxml-compat-normalize'
+          $env:OOXML_HTTP_PORT = '18086'
+          $env:OOXML_OPEN_BROWSER = 'false'
+          $env:OOXML_ENGINE_MODE = 'both'
+          $env:OOXML_DEFAULT_ENGINE = 'python'
+          $p = Start-Process -FilePath $exe -WorkingDirectory $root -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 120; $i++) {
+              try {
+                $mode = Invoke-RestMethod -Uri "$base/api/mode" -TimeoutSec 2
+                if ($mode.mode -eq 'both') { $ready = $true; break }
+              } catch {}
+              if ($p.HasExited) { break }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'Combined Windows executable did not become ready' }
+
+            $py = Invoke-RestMethod -Uri "$base/api/info?engine=python" -TimeoutSec 5
+            $java = Invoke-RestMethod -Uri "$base/api/info?engine=java" -TimeoutSec 5
+            if ($py.engine -ne 'python' -or $java.engine -ne 'java') { throw 'Both engines are not available' }
+
+            $mode = Invoke-RestMethod -Method Post -Uri "$base/api/mode?mode=python" -TimeoutSec 30
+            if ($mode.mode -ne 'python' -or $mode.enabledEngines -contains 'java') { throw 'Python-only mode failed' }
+            $mode = Invoke-RestMethod -Method Post -Uri "$base/api/mode?mode=java" -TimeoutSec 30
+            if ($mode.mode -ne 'java' -or $mode.enabledEngines -contains 'python') { throw 'Java-only mode failed' }
+            $mode = Invoke-RestMethod -Method Post -Uri "$base/api/mode?mode=both" -TimeoutSec 30
+            if ($mode.mode -ne 'both' -or $mode.enabledEngines.Count -ne 2) { throw 'Both mode restore failed' }
+
+            $home = Invoke-WebRequest -Uri "$base/" -TimeoutSec 5
+            if ($home.Content -notmatch 'Solo Python' -or $home.Content -notmatch 'Solo Java / Quarkus') {
+              throw 'Combined UI mode selector is missing'
+            }
+
+            foreach ($log in @(
+              'logs/ooxml-compat-normalize-gateway.log',
+              'logs/ooxml-compat-normalize-python.log',
+              'logs/ooxml-compat-normalize-quarkus.log'
+            )) {
+              if (-not (Test-Path (Join-Path $root $log))) { throw "Missing portable log: $log" }
+            }
+          }
+          finally {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          }
+
+      - name: Smoke-test Linux combined executable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$PWD/combined-release/${{ matrix.root_name }}"
+          base='http://127.0.0.1:18086/ooxml-compat-normalize'
+          OOXML_HTTP_PORT=18086 OOXML_OPEN_BROWSER=false OOXML_ENGINE_MODE=both OOXML_DEFAULT_ENGINE=python             "$root/OOXML-Compat-Normalize-Combined" >"$RUNNER_TEMP/combined-portable-console.log" 2>&1 &
+          pid=$!
+          cleanup() { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          ready=false
+          for i in $(seq 1 120); do
+            if curl -fsS "$base/api/mode" > /tmp/combined-mode.json; then ready=true; break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            cat "$RUNNER_TEMP/combined-portable-console.log" || true
+            exit 1
+          fi
+
+          curl -fsS "$base/api/info?engine=python" | grep -q '"engine"[[:space:]]*:[[:space:]]*"python"'
+          curl -fsS "$base/api/info?engine=java" | grep -q '"engine"[[:space:]]*:[[:space:]]*"java"'
+          curl -fsS -X POST "$base/api/mode?mode=python" | grep -q '"mode"[[:space:]]*:[[:space:]]*"python"'
+          curl -fsS -X POST "$base/api/mode?mode=java" | grep -q '"mode"[[:space:]]*:[[:space:]]*"java"'
+          curl -fsS -X POST "$base/api/mode?mode=both" | grep -q '"mode"[[:space:]]*:[[:space:]]*"both"'
+          curl -fsS "$base/" | grep -q 'Solo Java / Quarkus'
+
+          test -s "$root/logs/ooxml-compat-normalize-gateway.log"
+          test -s "$root/logs/ooxml-compat-normalize-python.log"
+          test -s "$root/logs/ooxml-compat-normalize-quarkus.log"
+
+          trap - EXIT
+          cleanup
+
+      - name: Package Windows combined portable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rootName = '${{ matrix.root_name }}'
+          $base = Resolve-Path 'combined-release'
+          $archive = Join-Path $base "$rootName.zip"
+          if (Test-Path $archive) { Remove-Item $archive -Force }
+          Compress-Archive -Path (Join-Path $base $rootName) -DestinationPath $archive -CompressionLevel Optimal
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $rootName.zip" | Set-Content -Encoding ascii (Join-Path $base "$rootName.sha256")
+
+      - name: Package Linux combined portable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd combined-release
+          tar -czf "${{ matrix.root_name }}.tar.gz" "${{ matrix.root_name }}"
+          sha256sum "${{ matrix.root_name }}.tar.gz" > "${{ matrix.root_name }}.sha256"
+
+      - name: Verify archive root
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          base = Path('combined-release')
+          root = Path('${{ matrix.root_name }}')
+          if (base / (root.name + '.zip')).exists():
+              archive = base / (root.name + '.zip')
+              with zipfile.ZipFile(archive) as zf:
+                  names = zf.namelist()
+          else:
+              archive = base / (root.name + '.tar.gz')
+              with tarfile.open(archive, 'r:gz') as tf:
+                  names = [m.name for m in tf.getmembers()]
+          roots = {n.replace('\\', '/').lstrip('./').split('/', 1)[0] for n in names if n.replace('\\', '/').lstrip('./')}
+          if roots != {root.name}:
+              raise SystemExit(f'{archive.name}: unexpected roots {sorted(roots)}')
+          print(f'{archive.name}: top-level folder OK -> {root.name}/')
+          PY
+
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+          MANUAL_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_EVENT_TAG:-${MANUAL_TAG:-}}"
+          test -n "$tag"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            asset="combined-release/${{ matrix.root_name }}.zip"
+          else
+            asset="combined-release/${{ matrix.root_name }}.tar.gz"
+          fi
+          checksum="combined-release/${{ matrix.root_name }}.sha256"
+          gh release upload "$tag" "$asset" "$checksum" --repo "$GITHUB_REPOSITORY" --clobber

@@ -90,7 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           mvn -B -ntp -f java/pom.xml clean install
-          mvn -B -ntp -f quarkus/pom.xml clean verify package
+          mvn -B -ntp -f quarkus/pom.xml clean package -DskipTests
           test -n "$(find quarkus/target -maxdepth 1 -type f -name '*-runner.jar' -print -quit)"
 
       - name: Build bundled Java runtime

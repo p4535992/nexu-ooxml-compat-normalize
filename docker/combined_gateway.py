@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
@@ -22,6 +23,42 @@ STARTUP_MODE = os.environ.get("OOXML_ENGINE_MODE", "both").strip().lower() or "b
 MAX_BODY_SIZE = int(os.environ.get("OOXML_MAX_BODY_SIZE", str(256 * 1024 * 1024)))
 JAVA_PORT = int(os.environ.get("OOXML_JAVA_INTERNAL_PORT", "18081"))
 PYTHON_PORT = int(os.environ.get("OOXML_PYTHON_INTERNAL_PORT", "18082"))
+FROZEN = bool(getattr(sys, "frozen", False))
+APP_ROOT = Path(
+    os.environ.get(
+        "OOXML_APP_ROOT",
+        str(Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parents[1]),
+    )
+).resolve()
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+_gateway_log_override = os.environ.get("OOXML_GATEWAY_LOG_FILE")
+if _gateway_log_override:
+    GATEWAY_LOG_FILE = Path(_gateway_log_override).resolve()
+    LOG_DIR = Path(os.environ.get("OOXML_LOG_DIR", str(GATEWAY_LOG_FILE.parent))).resolve()
+else:
+    LOG_DIR = Path(os.environ.get("OOXML_LOG_DIR", str(APP_ROOT / "logs"))).resolve()
+    GATEWAY_LOG_FILE = LOG_DIR / "ooxml-compat-normalize-gateway.log"
+
+_java_candidate = APP_ROOT / "runtime" / "bin" / ("java.exe" if os.name == "nt" else "java")
+JAVA_EXECUTABLE = os.environ.get("OOXML_JAVA_EXECUTABLE") or (str(_java_candidate) if _java_candidate.is_file() else "java")
+QUARKUS_JAR = Path(
+    os.environ.get("OOXML_QUARKUS_JAR", str(APP_ROOT / "java" / "ooxml-compat-normalize-quarkus.jar"))
+).resolve()
+VALIDATOR_EXECUTABLE = Path(
+    os.environ.get(
+        "OOXML_OPENXML_VALIDATOR",
+        str(APP_ROOT / "validator" / ("OpenXmlSdkValidator.exe" if os.name == "nt" else "OpenXmlSdkValidator")),
+    )
+).resolve()
+OPEN_BROWSER = _env_bool("OOXML_OPEN_BROWSER", FROZEN)
 ENGINE_ORDER = ("python", "java")
 ALLOWED_MODES = {"both", "python", "java"}
 
@@ -208,7 +245,7 @@ def configure_logging() -> logging.Logger:
     stream = logging.StreamHandler()
     stream.setFormatter(formatter)
     logger.addHandler(stream)
-    log_path = Path(os.environ.get("OOXML_GATEWAY_LOG_FILE", "/data/logs/ooxml-compat-normalize-gateway.log"))
+    log_path = GATEWAY_LOG_FILE
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         rotating = RotatingFileHandler(log_path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")
@@ -251,7 +288,7 @@ def backend_environment(engine: str) -> dict[str, str]:
                 "QUARKUS_HTTP_HOST": "127.0.0.1",
                 "QUARKUS_HTTP_PORT": str(JAVA_PORT),
                 "OOXML_CONTEXT_PATH": CONTEXT_PATH,
-                "OOXML_LOG_FILE": "/data/logs/ooxml-compat-normalize-quarkus.log",
+                "OOXML_LOG_FILE": str(LOG_DIR / "ooxml-compat-normalize-quarkus.log"),
                 "OOXML_OPEN_BROWSER": "false",
             }
         )
@@ -261,8 +298,8 @@ def backend_environment(engine: str) -> dict[str, str]:
                 "OOXML_HTTP_HOST": "127.0.0.1",
                 "OOXML_HTTP_PORT": str(PYTHON_PORT),
                 "OOXML_CONTEXT_PATH": CONTEXT_PATH,
-                "OOXML_LOG_FILE": "/data/logs/ooxml-compat-normalize-python.log",
-                "OOXML_OPENXML_VALIDATOR": "/app/validator/OpenXmlSdkValidator",
+                "OOXML_LOG_FILE": str(LOG_DIR / "ooxml-compat-normalize-python.log"),
+                "OOXML_OPENXML_VALIDATOR": str(VALIDATOR_EXECUTABLE),
                 "OOXML_SDK_VALIDATION": "required",
             }
         )
@@ -271,10 +308,18 @@ def backend_environment(engine: str) -> dict[str, str]:
 
 def launch_backend(engine: str) -> subprocess.Popen[bytes]:
     if engine == "java":
-        command = ["java", "-jar", "/app/java/ooxml-compat-normalize-quarkus.jar"]
+        if not QUARKUS_JAR.is_file():
+            raise RuntimeError(f"Quarkus JAR not found: {QUARKUS_JAR}")
+        command = [JAVA_EXECUTABLE, "-jar", str(QUARKUS_JAR)]
+    elif FROZEN:
+        command = [sys.executable, "--python-backend"]
     else:
         command = [sys.executable, "-m", "ooxml_compat_normalize.web_server"]
-    process = subprocess.Popen(command, env=backend_environment(engine))
+
+    kwargs: dict[str, object] = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    process = subprocess.Popen(command, env=backend_environment(engine), **kwargs)
     try:
         wait_for_backend(engine, process)
     except Exception:
@@ -542,9 +587,32 @@ class CombinedHandler(BaseHTTPRequestHandler):
             self.send_text(str(exc), HTTPStatus.BAD_REQUEST)
 
 
+def _open_browser(port: int) -> None:
+    if not OPEN_BROWSER:
+        return
+    url = f"http://127.0.0.1:{port}{UI_PATH}"
+
+    def opener() -> None:
+        time.sleep(0.5)
+        try:
+            webbrowser.open(url, new=2)
+            LOG.info("Opened default browser: %s", url)
+        except Exception:
+            LOG.exception("Could not open default browser: %s", url)
+
+    threading.Thread(target=opener, name="ooxml-browser-opener", daemon=True).start()
+
+
+def _run_frozen_python_backend() -> None:
+    from ooxml_compat_normalize.web_server import main as python_web_main
+
+    python_web_main()
+
+
 def main() -> None:
     host = os.environ.get("OOXML_HTTP_HOST", "0.0.0.0")
     port = int(os.environ.get("OOXML_HTTP_PORT", "8080"))
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     MANAGER.set_mode(STARTUP_MODE)
     server = ThreadingHTTPServer((host, port), CombinedHandler)
     stopping = threading.Event()
@@ -578,6 +646,7 @@ def main() -> None:
         MANAGER.default_engine(),
         ",".join(MANAGER.enabled_engines()),
     )
+    _open_browser(port)
     try:
         server.serve_forever()
     finally:
@@ -588,4 +657,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if FROZEN and "--python-backend" in sys.argv[1:]:
+        _run_frozen_python_backend()
+    else:
+        main()

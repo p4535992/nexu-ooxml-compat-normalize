@@ -610,7 +610,7 @@ def _run_frozen_python_backend() -> None:
 
 
 def main() -> None:
-    host = os.environ.get("OOXML_HTTP_HOST", "0.0.0.0")
+    host = os.environ.get("OOXML_HTTP_HOST", "127.0.0.1" if FROZEN else "0.0.0.0")
     port = int(os.environ.get("OOXML_HTTP_PORT", "8080"))
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     MANAGER.set_mode(STARTUP_MODE)

@@ -212,8 +212,8 @@ jobs:
             $mode = Invoke-RestMethod -Method Post -Uri "$base/api/mode?mode=both" -TimeoutSec 30
             if ($mode.mode -ne 'both' -or $mode.enabledEngines.Count -ne 2) { throw 'Both mode restore failed' }
 
-            $home = Invoke-WebRequest -Uri "$base/" -TimeoutSec 5
-            if ($home.Content -notmatch 'Solo Python' -or $home.Content -notmatch 'Solo Java / Quarkus') {
+            $homePage = Invoke-WebRequest -Uri "$base/" -TimeoutSec 5
+            if ($homePage.Content -notmatch 'Solo Python' -or $homePage.Content -notmatch 'Solo Java / Quarkus') {
               throw 'Combined UI mode selector is missing'
             }
 

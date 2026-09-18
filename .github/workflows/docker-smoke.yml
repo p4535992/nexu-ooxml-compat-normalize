@@ -255,9 +255,11 @@ jobs:
 
           curl -fsS "$BASE_URL/" > /tmp/ooxml-combined-home.html
           grep -q 'OOXML Compat Normalize' /tmp/ooxml-combined-home.html
+          grep -q 'id="mode"' /tmp/ooxml-combined-home.html
+          grep -q 'value="both"' /tmp/ooxml-combined-home.html
+          grep -q 'Solo Python' /tmp/ooxml-combined-home.html
+          grep -q 'Solo Java / Quarkus' /tmp/ooxml-combined-home.html
           grep -q 'id="engine"' /tmp/ooxml-combined-home.html
-          grep -q 'Java / Quarkus' /tmp/ooxml-combined-home.html
-          grep -q '>Python<' /tmp/ooxml-combined-home.html
           grep -q 'Normalizza e scarica' /tmp/ooxml-combined-home.html
 
           if curl -fsS "http://127.0.0.1:${OOXML_PORT}/api/info" >/dev/null 2>&1; then

@@ -226,7 +226,10 @@ jobs:
             }
           }
           finally {
-            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            if (-not $p.HasExited) {
+              & taskkill.exe /PID $p.Id /T /F | Out-Null
+            }
+            Start-Sleep -Milliseconds 750
           }
 
       - name: Smoke-test Linux combined executable
@@ -275,6 +278,13 @@ jobs:
           $base = Resolve-Path 'combined-release'
           $archive = Join-Path $base "$rootName.zip"
           if (Test-Path $archive) { Remove-Item $archive -Force }
+
+          # Smoke-test logs are useful in CI but should not be shipped pre-populated.
+          $logDir = Join-Path $base "$rootName/logs"
+          if (Test-Path $logDir) {
+            Get-ChildItem $logDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
+          }
+
           Compress-Archive -Path (Join-Path $base $rootName) -DestinationPath $archive -CompressionLevel Optimal
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $rootName.zip" | Set-Content -Encoding ascii (Join-Path $base "$rootName.sha256")

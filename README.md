@@ -297,6 +297,47 @@ OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe
 
 On Linux the portable contains the bundled runtime, both Java JARs, launchers, notices and `logs/` directory. No global Java installation is required.
 
+## Combined desktop portable (Java + Python)
+
+In addition to the dedicated Python desktop and Java/Quarkus distributions, the project builds a **combined desktop portable** that provides the same engine-selection model as the combined Docker image without requiring Docker or globally installed runtimes.
+
+Windows launcher:
+
+```text
+OOXML-Compat-Normalize-Combined.exe
+```
+
+Linux launcher:
+
+```text
+OOXML-Compat-Normalize-Combined
+```
+
+The primary launcher is produced with **PyInstaller**, so it is not a pure-Java executable. The portable directory also bundles the Java 17 runtime, the Quarkus JAR and the self-contained Microsoft Open XML SDK validator. On startup it opens:
+
+```text
+http://127.0.0.1:8080/ooxml-compat-normalize/
+```
+
+The HTML page and REST API support three real runtime modes:
+
+```text
+both    Python + Java active (default)
+python  only Python active
+java    only Java / Quarkus active
+```
+
+Changing to a single-engine mode actually stops the other backend process. The same control is exposed through `GET/POST /ooxml-compat-normalize/api/mode`.
+
+Portable release names:
+
+```text
+OOXML-Compat-Normalize-combined-portable-win-x64.zip
+OOXML-Compat-Normalize-combined-portable-linux-x64.tar.gz
+```
+
+Logs remain beside the executable under `logs/`. See [`portable/COMBINED-README.md`](portable/COMBINED-README.md).
+
 ## Java o Python: quale normalizzatore è migliore?
 
 The project intentionally keeps **two independent normalization runtimes**. The goal is not to make one language win, but to converge both implementations toward the same OOXML semantics and use the differences as an additional regression signal.
@@ -407,6 +448,10 @@ OOXML-Compat-Normalize-java-portable-linux-x64.tar.gz
 # Windows Quarkus installer
 OOXML-Compat-Normalize-java-quarkus-installer-win-x64.exe
 
+# Combined desktop portable
+OOXML-Compat-Normalize-combined-portable-win-x64.zip
+OOXML-Compat-Normalize-combined-portable-linux-x64.tar.gz
+
 SHA256SUMS.txt
 ```
 
@@ -419,7 +464,7 @@ The project deliberately separates normalization from validation and delivery:
 - **Python standard library** — primary package-preserving normalization/audit engine plus lightweight local HTTP/REST service;
 - **Microsoft Open XML SDK** — independent structural validation embedded in Python desktop and Python Docker builds;
 - **.NET self-contained publish** — bundles that validator without requiring a .NET installation;
-- **Tkinter + PyInstaller** — Python desktop GUI and one-file Windows/Linux distributions;
+- **Tkinter + PyInstaller** — Python desktop GUI plus the Python-based combined Windows/Linux launcher;
 - **Apache POI 5.5.1** — Java cross-format OPC/OOXML parser;
 - **docx4j 17.1.0** — independent Java OOXML parser/model;
 - **Quarkus 3.39.3 / Quarkus REST Jackson** — local Java web/API wrapper around the Java core;

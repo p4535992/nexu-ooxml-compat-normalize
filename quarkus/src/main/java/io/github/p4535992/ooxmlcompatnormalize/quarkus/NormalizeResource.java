@@ -42,7 +42,7 @@ public class NormalizeResource {
     public InfoResponse info() {
         return new InfoResponse(
                 "ooxml-compat-normalize-quarkus",
-                "0.4.0-rc.9",
+                "0.4.0-rc.11",
                 "java",
                 normalizeContextPath(rootPath),
                 List.of("docx", "xlsx", "pptx"),

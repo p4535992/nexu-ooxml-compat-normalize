@@ -1,6 +1,6 @@
 package io.github.p4535992.ooxmlcompatnormalize.quarkus;
 
-import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.QuarkusIntegrationTest;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
@@ -8,13 +8,13 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
 
-@QuarkusTest
-class NormalizeResourceTest {
+@QuarkusIntegrationTest
+class NormalizeResourceIT {
     private static final String CONTEXT = "/ooxml-compat-normalize";
 
     @Test
     void infoEndpointIsAvailableUnderConfiguredContextPath() {
-        // QuarkusTest configures RestAssured with quarkus.http.root-path.
+        // Integration tests start the packaged JAR and configure the HTTP root path.
         // Keep test paths relative so the configured context is applied exactly once.
         given()
                 .when().get("/api/info")

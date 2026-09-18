@@ -6,7 +6,7 @@
 
   <groupId>io.github.p4535992</groupId>
   <artifactId>ooxml-compat-normalize-quarkus</artifactId>
-  <version>0.4.0-rc.9</version>
+  <version>0.4.0-rc.11</version>
   <name>ooxml-compat-normalize Quarkus local service</name>
   <description>Small local Quarkus service and web UI for the OOXML normalizer.</description>
 
@@ -35,7 +35,7 @@
     <dependency>
       <groupId>io.github.p4535992</groupId>
       <artifactId>ooxml-compat-normalize-java</artifactId>
-      <version>0.4.0-rc.9</version>
+      <version>0.4.0-rc.11</version>
       <!-- docx4j brings jcl-over-slf4j for standalone use. Quarkus already
            provides its own Commons Logging -> JBoss Logging bridge, so keeping
            both would put duplicate org.apache.commons.logging classes in the
@@ -87,6 +87,19 @@
         <configuration>
           <systemPropertyVariables>
             <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <!-- HTTP contract tests run against the actual distributable JAR. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <version>${surefire-plugin.version}</version>
+        <executions><execution><goals><goal>integration-test</goal><goal>verify</goal></goals></execution></executions>
+        <configuration>
+          <systemPropertyVariables>
+            <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+            <maven.home>${maven.home}</maven.home>
           </systemPropertyVariables>
         </configuration>
       </plugin>

@@ -1,0 +1,51 @@
+name: Diagnose rc10 Quarkus test routing
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/diagnose-rc10.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v0.4.0-rc.10
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: |
+            java/pom.xml
+            quarkus/pom.xml
+      - name: Add routing diagnostics to the test workspace only
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('quarkus/src/test/java/io/github/p4535992/ooxmlcompatnormalize/quarkus/NormalizeResourceTest.java')
+          s = p.read_text()
+          marker = '    private static final String CONTEXT'
+          diagnostic = '''    @org.junit.jupiter.api.BeforeEach
+              void diagnosticRoutes() throws Exception {
+                  var client = java.net.http.HttpClient.newHttpClient();
+                  System.out.println("ROUTE_DIAG port=" + io.restassured.RestAssured.port + " base=" + io.restassured.RestAssured.basePath);
+                  for (String path : new String[] {"/api/info", "/ooxml-compat-normalize/api/info", "/ooxml-compat-normalize/ooxml-compat-normalize/api/info", "/ooxml-compat-normalizeapi/info", "/ooxml-compat-normalize//api/info", "/ooxml-compat-normalize/q/openapi"}) {
+                      var req = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:" + io.restassured.RestAssured.port + path)).GET().build();
+                      var response = client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+                      System.out.println("ROUTE_DIAG " + path + " -> " + response.statusCode() + " " + response.body().substring(0, Math.min(250, response.body().length())));
+                  }
+              }
+          '''
+          assert marker in s
+          p.write_text(s.replace(marker, diagnostic + marker))
+          PY
+      - name: Build core and execute the unchanged assertions with diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -f java/pom.xml clean install
+          mvn -B -ntp -f quarkus/pom.xml clean test

@@ -15,6 +15,7 @@ on:
     paths:
       - 'docker/combined_gateway.py'
       - 'portable/OOXMLCompatNormalizeCombined.spec'
+      - 'portable/COMBINED-README.md'
       - 'src/**'
       - 'java/**'
       - 'quarkus/**'

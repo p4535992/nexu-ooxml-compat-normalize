@@ -101,7 +101,7 @@ jobs:
             gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$source_sha" >/dev/null
           else
             source_sha="$(git rev-parse HEAD)"
-            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
+            tag_sha="$(git rev-parse "$TAG^{commit}")"
             [ "$tag_sha" = "$source_sha" ] || { echo "Tag $TAG does not point at checked-out source"; exit 1; }
           fi
 

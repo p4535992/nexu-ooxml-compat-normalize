@@ -12,6 +12,21 @@ jobs:
   dispatch:
     runs-on: ubuntu-24.04
     steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Remove one-shot dispatcher from release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/release-v0.4.1-on-public.yml
+          git commit -m 'ci: remove v0.4.1 public-release dispatcher'
+          git push origin HEAD:main
+
       - name: Dispatch verified stable v0.4.1 release
         shell: bash
         env:
@@ -27,19 +42,3 @@ jobs:
             --ref main \
             -f release_tag=v0.4.1
           echo "Dispatched release-stable.yml for v0.4.1."
-
-      - name: Remove one-shot dispatcher
-        if: success()
-        uses: actions/checkout@v5
-        with:
-          ref: main
-      - name: Commit dispatcher cleanup
-        if: success()
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/workflows/release-v0.4.1-on-public.yml
-          git commit -m 'ci: remove v0.4.1 public-release dispatcher'
-          git push origin HEAD:main

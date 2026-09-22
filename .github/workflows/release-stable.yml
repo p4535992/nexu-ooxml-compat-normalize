@@ -419,5 +419,5 @@ jobs:
           set -euo pipefail
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isDraft,isPrerelease,assets > published.json
-          jq -e '.isPrerelease == true and .isDraft == false' published.json
+          jq -e '.isPrerelease == false and .isDraft == false' published.json
           jq '{url,isDraft,isPrerelease,assets:[.assets[].name]}' published.json

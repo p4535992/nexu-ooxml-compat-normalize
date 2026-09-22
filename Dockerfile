@@ -15,9 +15,9 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 FROM eclipse-temurin:17-jre
 
-LABEL org.opencontainers.image.title="OOXML Compat Normalize - Quarkus" \
+LABEL org.opencontainers.image.title="NexU OOXML Compat Normalize - Quarkus" \
       org.opencontainers.image.description="Local OOXML normalization web/API service" \
-      org.opencontainers.image.source="https://github.com/p4535992/ooxml-compat-normalize"
+      org.opencontainers.image.source="https://github.com/p4535992/nexu-ooxml-compat-normalize"
 
 WORKDIR /app
 

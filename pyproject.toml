@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-  { name = "ooxml-compat-normalize contributors" }
+  { name = "nexu-ooxml-compat-normalize contributors" }
 ]
 keywords = ["docx", "ooxml", "onlyoffice", "libreoffice", "xlsx", "pptx"]
 classifiers = [
@@ -23,6 +23,11 @@ classifiers = [
   "Topic :: Office/Business :: Office Suites",
 ]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/p4535992/nexu-ooxml-compat-normalize"
+Repository = "https://github.com/p4535992/nexu-ooxml-compat-normalize"
+Issues = "https://github.com/p4535992/nexu-ooxml-compat-normalize/issues"
 
 [project.optional-dependencies]
 portable = ["pyinstaller>=6.10"]

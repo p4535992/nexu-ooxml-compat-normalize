@@ -1,6 +1,10 @@
-# ooxml-compat-normalize
+# nexu-ooxml-compat-normalize
 
 Loss-averse OOXML interoperability normalizer for **DOCX, XLSX and PPTX**.
+
+Repository: `https://github.com/p4535992/nexu-ooxml-compat-normalize`
+
+> **Compatibility note:** the repository/project name is now **nexu-ooxml-compat-normalize**. Existing technical identifiers such as the Python package and CLI commands (`ooxml-compat-normalize`), Java artifact IDs, REST context path, log names and `OOXML-Compat-Normalize-*` release filenames intentionally remain unchanged in the 0.4.x line to avoid breaking existing installations, scripts and integrations.
 
 The project is intentionally **not** a LibreOffice → ONLYOFFICE converter, nor an ONLYOFFICE → LibreOffice converter. Its goal is to normalize documents produced by LibreOffice, ONLYOFFICE, Microsoft Office and other OOXML consumers toward a **common, explicit and cross-suite OOXML representation** that can then be consumed again by any of those applications.
 

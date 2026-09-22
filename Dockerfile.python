@@ -17,9 +17,9 @@ RUN dotnet publish dotnet/OpenXmlSdkValidator/OpenXmlSdkValidator.csproj \
 
 FROM python:3.12-slim-bookworm
 
-LABEL org.opencontainers.image.title="OOXML Compat Normalize - Python" \
+LABEL org.opencontainers.image.title="NexU OOXML Compat Normalize - Python" \
       org.opencontainers.image.description="OOXML normalization web/API service using the Python engine" \
-      org.opencontainers.image.source="https://github.com/p4535992/ooxml-compat-normalize"
+      org.opencontainers.image.source="https://github.com/p4535992/nexu-ooxml-compat-normalize"
 
 WORKDIR /app
 

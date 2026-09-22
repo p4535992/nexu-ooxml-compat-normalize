@@ -7,8 +7,9 @@
   <groupId>io.github.p4535992</groupId>
   <artifactId>ooxml-compat-normalize-quarkus</artifactId>
   <version>0.4.0</version>
-  <name>ooxml-compat-normalize Quarkus local service</name>
+  <name>nexu-ooxml-compat-normalize Quarkus local service</name>
   <description>Small local Quarkus service and web UI for the OOXML normalizer.</description>
+  <url>https://github.com/p4535992/nexu-ooxml-compat-normalize</url>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

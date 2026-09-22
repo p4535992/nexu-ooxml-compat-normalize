@@ -98,10 +98,10 @@ jobs:
               for name, count in licenses.most_common():
                   print(f'  {count:3}  {name}')
               if missing:
-                  print(f'  WARNING: {len(missing)} component(s) have no license metadata in the generated SBOM:')
+                  print(f'  ERROR: {len(missing)} component(s) have no license metadata in the generated SBOM:')
                   for component in missing:
                       print(f'    - {component}')
-                  print('::warning::Some Java dependencies have no license metadata in Maven/CycloneDX; review them manually before a stable release.')
+                  raise SystemExit('License verification failed: dependency license metadata is incomplete')
           PY
 
       - name: Prepare audit artifact

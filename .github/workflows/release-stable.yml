@@ -7,8 +7,9 @@ on:
         required: true
         type: string
   push:
-    branches: [main]
-    paths: ['.github/workflows/release-stable.yml']
+    tags:
+      - 'v*.*.*'
+      - '!v*-*'
 permissions:
   contents: write
   actions: write
@@ -16,92 +17,130 @@ concurrency:
   group: verified-stable-release
   cancel-in-progress: false
 env:
-  TAG: ${{ inputs.release_tag || 'v0.4.0' }}
+  TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
   GH_TOKEN: ${{ github.token }}
 jobs:
   prepare:
-    if: >-
-      github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'release: publish v0.4.0 stable'
     runs-on: ubuntu-24.04
     outputs:
       source_sha: ${{ steps.prepare.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: main
-      - name: Align version metadata and create draft stable release
+          ref: ${{ github.event_name == 'push' && github.sha || 'main' }}
+      - name: Create stable tag and matching draft release
         id: prepare
         shell: bash
         run: |
           set -euo pipefail
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'An explicit stable release tag is required'; exit 1; }
+
+          # A release must never be silently replaced.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'Refusing to replace an existing release or draft'; exit 1
+            echo "Release $TAG already exists; refusing to replace it."
+            exit 1
           fi
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            echo 'Refusing to move an existing tag'; exit 1
-          fi
+
           python3 - <<'PY'
           import os, re
           from pathlib import Path
           import xml.etree.ElementTree as ET
+
           tag = os.environ['TAG']
+          event = os.environ['GITHUB_EVENT_NAME']
           match = re.fullmatch(r'v(\d+\.\d+\.\d+)', tag)
           assert match
-          java_version = match[1]
-          python_version = match[1]
-          pom = Path('java/pom.xml')
-          old_java = ET.fromstring(pom.read_text()).find('{http://maven.apache.org/POM/4.0.0}version').text
+          version = match[1]
+
           pyproject = Path('pyproject.toml')
+          init_py = Path('src/ooxml_compat_normalize/__init__.py')
+          java_pom = Path('java/pom.xml')
+          quarkus_pom = Path('quarkus/pom.xml')
+          resource = Path('quarkus/src/main/java/io/github/p4535992/ooxmlcompatnormalize/quarkus/NormalizeResource.java')
+
           old_python = re.search(r'^version\s*=\s*"([^"]+)"', pyproject.read_text(), re.M)[1]
-          replacements = [
-              (pyproject, old_python, python_version),
-              (Path('src/ooxml_compat_normalize/__init__.py'), old_python, python_version),
-              (pom, old_java, java_version),
-              (Path('quarkus/pom.xml'), old_java, java_version),
-              (Path('quarkus/src/main/java/io/github/p4535992/ooxmlcompatnormalize/quarkus/NormalizeResource.java'), old_java, java_version),
-          ]
-          for path, old, new in replacements:
-              text = path.read_text(encoding='utf-8')
-              assert old in text, f'Expected version not found in {path}'
-              path.write_text(text.replace(old, new), encoding='utf-8')
+          old_java = ET.fromstring(java_pom.read_text()).find('{http://maven.apache.org/POM/4.0.0}version').text
+
+          if event == 'workflow_dispatch':
+              replacements = [
+                  (pyproject, old_python, version),
+                  (init_py, old_python, version),
+                  (java_pom, old_java, version),
+                  (quarkus_pom, old_java, version),
+                  (resource, old_java, version),
+              ]
+              for path, old, new in replacements:
+                  text = path.read_text(encoding='utf-8')
+                  assert old in text, f'Expected version not found in {path}'
+                  path.write_text(text.replace(old, new), encoding='utf-8')
+          else:
+              # A directly pushed stable tag must already contain matching stable metadata.
+              assert old_python == version, (old_python, version)
+              assert re.search(r'__version__\s*=\s*"' + re.escape(version) + r'"', init_py.read_text())
+              assert old_java == version, (old_java, version)
+              assert '<version>' + version + '</version>' in quarkus_pom.read_text()
+              assert '"' + version + '"' in resource.read_text()
+
           assert Path('quarkus/src/test/java/io/github/p4535992/ooxmlcompatnormalize/quarkus/NormalizeResourceIT.java').exists()
           PY
+
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add pyproject.toml src/ooxml_compat_normalize/__init__.py java/pom.xml quarkus/pom.xml quarkus/src/main/java/io/github/p4535992/ooxmlcompatnormalize/quarkus/NormalizeResource.java
-          if ! git diff --cached --quiet; then
-            git commit -m "release: align version metadata for $TAG"
-            git push origin HEAD:main
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              echo "Tag $TAG already exists; refusing to move it."
+              exit 1
+            fi
+            git add pyproject.toml src/ooxml_compat_normalize/__init__.py java/pom.xml quarkus/pom.xml quarkus/src/main/java/io/github/p4535992/ooxmlcompatnormalize/quarkus/NormalizeResource.java
+            if ! git diff --cached --quiet; then
+              git commit -m "release: align version metadata for $TAG"
+              git push origin HEAD:main
+            fi
+            source_sha="$(git rev-parse HEAD)"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$source_sha" >/dev/null
+          else
+            source_sha="$(git rev-parse HEAD)"
+            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
+            [ "$tag_sha" = "$source_sha" ] || { echo "Tag $TAG does not point at checked-out source"; exit 1; }
           fi
-          source_sha="$(git rev-parse HEAD)"
+
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$source_sha" >/dev/null
+
           cat > notes.md <<EOF
           ## Stable release
 
-          Source: \`$source_sha\`.
-          This is the stable v0.4.0 release, rebuilt from the validated RC12 source line with stable version metadata.
-          This iteration refreshes the version metadata and distribution builds; it does not introduce new normalization rules.
+          Source: `$source_sha`.
+          This is the stable `$TAG` release.
 
           ### Combined desktop (no Docker required)
-          - Windows x64: \`OOXML-Compat-Normalize-combined-portable-win-x64.zip\`
-          - Linux x64: \`OOXML-Compat-Normalize-combined-portable-linux-x64.tar.gz\`
+          - Windows x64: `OOXML-Compat-Normalize-combined-portable-win-x64.zip`
+          - Linux x64: `OOXML-Compat-Normalize-combined-portable-linux-x64.tar.gz`
 
-          Extract the entire archive, then run \`OOXML-Compat-Normalize-Combined.exe\` or \`./OOXML-Compat-Normalize-Combined\`. Runtimes are bundled; keep the accompanying directories beside the executable.
+          Extract the entire archive, then run `OOXML-Compat-Normalize-Combined.exe` or `./OOXML-Compat-Normalize-Combined`. Runtimes are bundled; keep the accompanying directories beside the executable.
 
-          UI: \`http://127.0.0.1:8080/ooxml-compat-normalize/\`.
+          UI: `http://127.0.0.1:8080/ooxml-compat-normalize/`.
           Default: **Python + Java** active. HTML and REST also offer **only Python** and **only Java**. Selecting both makes both engines available, not a sequential double conversion.
-          Logs remain in the portable folder's \`logs/\` directory.
+          Logs remain in the portable folder's `logs/` directory.
 
-          ### Other distributions retained
+          ### Other distributions
           Dedicated Python/Java Windows and Linux portables, Java core and Quarkus JARs, Java Windows installer, and Java/Python/combined Docker Compose bundles in both ZIP and TAR.GZ.
-          Each archive has one root directory matching its name. Docker bundles include \`start_all.sh\` and \`down_all.sh\`.
+          Each archive has one root directory matching its name. Docker bundles include `start_all.sh` and `down_all.sh`.
 
-          All 15 primary assets are checked before publication and listed in \`SHA256SUMS.txt\`. Unit tests, packaged Quarkus HTTP tests, combined launcher checks and container regression checks are required.
+          All 15 primary assets are checked before publication and listed in `SHA256SUMS.txt`. Unit tests, packaged Quarkus HTTP tests, combined launcher checks and container regression checks are required.
           Original font families remain preserved by default. Test copies of representative documents; these checks do not guarantee pixel-identical rendering across office suites.
           EOF
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --latest=false --title "$TAG - Stable release" --notes-file notes.md
+
+          # The Release is created in the same job as the tag. Assets are uploaded to
+          # this draft and it is published only after all verification jobs succeed.
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft \
+            --latest=false \
+            --title "$TAG - Stable release" \
+            --notes-file notes.md
+
       - name: Start combined builds and Docker verification at the release tag
         shell: bash
         run: |

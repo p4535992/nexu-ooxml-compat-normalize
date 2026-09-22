@@ -3,12 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'New pre-release tag, for example v0.4.0-rc.12'
+        description: 'New pre-release tag, for example v0.4.1-rc.1'
         required: true
         type: string
-  push:
-    branches: [main]
-    paths: ['.github/workflows/release-prerelease.yml']
 permissions:
   contents: write
   actions: write
@@ -16,12 +13,10 @@ concurrency:
   group: verified-prerelease
   cancel-in-progress: false
 env:
-  TAG: ${{ inputs.release_tag || 'v0.4.0-rc.12' }}
+  TAG: ${{ inputs.release_tag }}
   GH_TOKEN: ${{ github.token }}
 jobs:
   prepare:
-    if: >-
-      github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'release: publish v0.4.0-rc.12 pre-release'
     runs-on: ubuntu-24.04
     outputs:
       source_sha: ${{ steps.prepare.outputs.source_sha }}

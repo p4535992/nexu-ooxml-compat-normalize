@@ -23,8 +23,6 @@ on:
       - 'dotnet/**'
       - 'pyproject.toml'
       - '.github/workflows/portable-release.yml'
-    tags:
-      - 'v*'
 
 permissions:
   contents: write
@@ -158,11 +156,13 @@ jobs:
           PY
 
       - name: Upload Python portable artifact
+        if: needs.release_config.outputs.publish == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: payload/
           if-no-files-found: error
+          retention-days: 1
 
   java:
     name: Build Java core and Quarkus JARs
@@ -264,14 +264,17 @@ jobs:
           sha256sum java-jars/*.jar > java-jars/SHA256SUMS-java.txt
 
       - name: Upload Java JARs
+        if: needs.release_config.outputs.publish == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: OOXML-Compat-Normalize-java-jars
           path: java-jars/
           if-no-files-found: error
+          retention-days: 1
 
   java_portable:
     name: Build Java portable ${{ matrix.rid }}
+    if: needs.release_config.outputs.publish == 'true'
     needs: [release_config, java]
     strategy:
       fail-fast: false
@@ -461,6 +464,7 @@ jobs:
           name: ${{ matrix.artifact }}
           path: java-portable-release/
           if-no-files-found: error
+          retention-days: 1
 
       - name: Upload Linux Java portable
         if: runner.os == 'Linux'
@@ -469,6 +473,7 @@ jobs:
           name: ${{ matrix.artifact }}
           path: java-portable/
           if-no-files-found: error
+          retention-days: 1
 
   release:
     name: Publish GitHub Release

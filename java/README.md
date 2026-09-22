@@ -23,7 +23,7 @@ The build produces:
 java/target/ooxml-compat-normalize-java.jar
     thin library JAR used by the Quarkus module
 
-java/target/ooxml-compat-normalize-java-0.4.0-rc.9-all.jar
+java/target/ooxml-compat-normalize-java-0.4.0-all.jar
     shaded executable CLI JAR
 ```
 
